@@ -1,5 +1,7 @@
 # TradingAgents 中文增强版
 
+> **🚀 新会话快速开始**: 请先阅读 [SESSION_START.md](SESSION_START.md) 了解项目最新状态！
+
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/Version-v1.0.8-green.svg)](./VERSION)
