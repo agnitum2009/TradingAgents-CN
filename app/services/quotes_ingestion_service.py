@@ -365,24 +365,37 @@ class QuotesIngestionService:
             return True
 
     async def _bulk_upsert(self, quotes_map: Dict[str, Dict], trade_date: str, source: Optional[str] = None) -> None:
+        """
+        批量更新行情数据（性能优化版：分批处理）
+
+        优化点：
+        1. 使用固定批次大小 (500条/批) 避免内存溢出
+        2. 分批执行 bulk_write，失败时只影响当前批次
+        3. 使用 ordered=False 提升并发性能
+        """
         db = get_mongo_db()
         coll = db[self.collection_name]
-        ops = []
+
+        # 🔥 性能优化：分批处理，避免内存溢出
+        BATCH_SIZE = 500
+        all_ops = []
         updated_at = datetime.now(self.tz)
+
         for code, q in quotes_map.items():
             if not code:
                 continue
+
             # 使用标准化方法处理股票代码（去掉交易所前缀，如 sz000001 -> 000001）
             code6 = self._normalize_stock_code(code)
             if not code6:
                 continue
 
-            # 🔥 日志：记录写入的成交量值
+            # 日志：记录写入的成交量值（仅示例股票）
             volume = q.get("volume")
-            if code6 in ["300750", "000001", "600000"]:  # 只记录几个示例股票
+            if code6 in ["300750", "000001", "600000"]:
                 logger.info(f"📊 [写入market_quotes] {code6} - volume={volume}, amount={q.get('amount')}, source={source}")
 
-            ops.append(
+            all_ops.append(
                 UpdateOne(
                     {"code": code6},
                     {"$set": {
@@ -402,12 +415,44 @@ class QuotesIngestionService:
                     upsert=True,
                 )
             )
-        if not ops:
+
+        if not all_ops:
             logger.info("无可写入的数据，跳过")
             return
-        result = await coll.bulk_write(ops, ordered=False)
+
+        # 🔥 性能优化：分批执行 bulk_write
+        total_matched = 0
+        total_upserted = 0
+        total_modified = 0
+        batch_count = (len(all_ops) + BATCH_SIZE - 1) // BATCH_SIZE
+
+        for i in range(0, len(all_ops), BATCH_SIZE):
+            batch = all_ops[i:i + BATCH_SIZE]
+            batch_num = i // BATCH_SIZE + 1
+
+            try:
+                result = await coll.bulk_write(batch, ordered=False)
+                total_matched += result.matched_count
+                total_upserted += len(result.upserted_ids) if result.upserted_ids else 0
+                total_modified += result.modified_count
+
+                logger.info(
+                    f"✅ 批次 {batch_num}/{batch_count} 完成: "
+                    f"matched={result.matched_count}, "
+                    f"upserted={len(result.upserted_ids) if result.upserted_ids else 0}, "
+                    f"modified={result.modified_count}"
+                )
+            except Exception as e:
+                logger.error(f"❌ 批次 {batch_num}/{batch_count} 失败: {e}")
+                # 继续处理下一批，避免全部失败
+                continue
+
         logger.info(
-            f"✅ 行情入库完成 source={source}, matched={result.matched_count}, upserted={len(result.upserted_ids) if result.upserted_ids else 0}, modified={result.modified_count}"
+            f"✅ 行情入库完成 source={source}, "
+            f"total_matched={total_matched}, "
+            f"total_upserted={total_upserted}, "
+            f"total_modified={total_modified}, "
+            f"batch_count={batch_count}"
         )
 
     async def backfill_from_historical_data(self) -> None:

@@ -41,6 +41,11 @@
                 <span>最近24小时市场热词</span>
               </template>
               <div class="wordcloud-container" ref="wordcloudRef" style="height: 300px;">
+                <!-- 版本和模块信息水印 -->
+                <div class="wordcloud-watermark">
+                  <div class="watermark-version">{{ appVersion }}</div>
+                  <div class="watermark-module">{{ moduleName }}</div>
+                </div>
                 <div class="wordcloud-wrapper" v-if="hotWords.length > 0">
                   <span
                     v-for="(word, index) in hotWords"
@@ -170,6 +175,10 @@ const viewStrategy = ref<'dynamic_hot' | 'timeline'>('dynamic_hot')
 // 热词相关
 const hotWords = ref<any[]>([])
 const hotWordsLoading = ref(false)
+
+// 版本信息
+const appVersion = ref('v1.0.3')
+const moduleName = ref('市场热词分析')
 
 // 加载热词数据
 const loadHotWords = async () => {
@@ -427,6 +436,46 @@ onBeforeUnmount(() => {
       padding: 20px;
       overflow: hidden;
       position: relative;
+
+      // 版本和模块信息水印
+      .wordcloud-watermark {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        pointer-events: none;
+
+        .watermark-version {
+          font-size: 11px;
+          font-weight: 600;
+          color: rgba(255, 255, 255, 0.85);
+          background: rgba(0, 0, 0, 0.25);
+          padding: 3px 8px;
+          border-radius: 4px;
+          backdrop-filter: blur(4px);
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+          letter-spacing: 0.5px;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          display: inline-block;
+        }
+
+        .watermark-module {
+          font-size: 10px;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.75);
+          background: rgba(0, 0, 0, 0.2);
+          padding: 2px 6px;
+          border-radius: 3px;
+          backdrop-filter: blur(4px);
+          text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+          letter-spacing: 0.3px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          display: inline-block;
+        }
+      }
 
       .wordcloud-wrapper {
         display: flex;

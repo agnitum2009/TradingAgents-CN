@@ -12,6 +12,7 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.core.unified_config import unified_config
+from app.core.config_cache import get_config_cache  # 🔥 性能优化：导入配置缓存
 from app.models.config import (
     SystemConfig, LLMConfig, DataSourceConfig, DatabaseConfig,
     ModelProvider, DataSourceType, DatabaseType, LLMProvider,
@@ -360,9 +361,26 @@ class ConfigService:
             return False
 
     async def get_system_config(self) -> Optional[SystemConfig]:
-        """获取系统配置 - 优先从数据库获取最新数据"""
+        """
+        获取系统配置（性能优化版：使用缓存）
+
+        优化点：
+        - 优先从缓存获取，缓存命中时响应时间 < 2ms
+        - 缓存未命中时从数据库读取并存入缓存
+        - TTL 5分钟，平衡实时性和性能
+        """
         try:
-            # 直接从数据库获取最新配置，避免缓存问题
+            # 🔥 性能优化：先检查缓存
+            cache = get_config_cache()
+            cache_key = "system_config"
+            cached_config = cache.get(cache_key)
+
+            if cached_config is not None:
+                logger.debug(f"✅ 使用缓存的系统配置 (命中率: {cache.hit_rate:.1%})")
+                return cached_config
+
+            # 缓存未命中，从数据库获取
+            logger.debug("⏳ 缓存未命中，从数据库读取系统配置...")
             db = await self._get_db()
             config_collection = db.system_configs
 
@@ -372,24 +390,32 @@ class ConfigService:
             )
 
             if config_data:
-                print(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
-                return SystemConfig(**config_data)
+                config = SystemConfig(**config_data)
+                logger.info(f"📊 从数据库获取配置，版本: {config_data.get('version', 0)}, LLM配置数量: {len(config_data.get('llm_configs', []))}")
+
+                # 🔥 存入缓存（5分钟TTL）
+                cache.set(cache_key, config, ttl=300)
+                return config
 
             # 如果没有配置，创建默认配置
-            print("⚠️ 数据库中没有配置，创建默认配置")
-            return await self._create_default_config()
+            logger.warning("⚠️ 数据库中没有配置，创建默认配置")
+            default_config = await self._create_default_config()
+
+            # 缓存默认配置
+            cache.set(cache_key, default_config, ttl=300)
+            return default_config
 
         except Exception as e:
-            print(f"❌ 从数据库获取配置失败: {e}")
+            logger.error(f"❌ 获取系统配置失败: {e}")
 
             # 作为最后的回退，尝试从统一配置管理器获取
             try:
                 unified_system_config = await unified_config.get_unified_system_config()
                 if unified_system_config:
-                    print("🔄 回退到统一配置管理器")
+                    logger.info("🔄 回退到统一配置管理器")
                     return unified_system_config
             except Exception as e2:
-                print(f"从统一配置获取也失败: {e2}")
+                logger.error(f"从统一配置获取也失败: {e2}")
 
             return None
     
@@ -552,6 +578,11 @@ class ConfigService:
 
             insert_result = await config_collection.insert_one(config_dict)
             print(f"📝 新配置ID: {insert_result.inserted_id}")
+
+            # 🔥 性能优化：使配置缓存失效
+            cache = get_config_cache()
+            cache.invalidate("system_config")
+            print("🗑️ 配置缓存已清除")
 
             # 验证保存结果
             saved_config = await config_collection.find_one({"_id": insert_result.inserted_id})

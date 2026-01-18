@@ -19,8 +19,14 @@ sys.path.insert(0, str(project_root))
 from tradingagents.utils.logging_init import init_logging
 init_logging()
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+# 解耦阶段三：已移除直接导入 TradingAgentsGraph
+# 原代码: from tradingagents.graph.trading_graph import TradingAgentsGraph
+# 现在通过适配器接口创建引擎实例
 from tradingagents.default_config import DEFAULT_CONFIG
+
+# 解耦：引入分析引擎适配器
+from app.services.analysis_engine import get_engine_manager
+
 from app.models.analysis import (
     AnalysisTask, AnalysisStatus, SingleAnalysisRequest, AnalysisParameters
 )
@@ -607,6 +613,10 @@ class SimpleAnalysisService:
         logger.info(f"🔧 [服务初始化] 内存管理器实例ID: {id(self.memory_manager)}")
         logger.info(f"🔧 [服务初始化] 线程池最大并发数: 3")
 
+        # 解耦阶段三：使用适配器模式
+        # 引擎管理器单例
+        self._engine_manager = get_engine_manager()
+
         # 设置 WebSocket 管理器
         # 简单的股票名称缓存，减少重复查询
         self._stock_name_cache: Dict[str, str] = {}
@@ -704,28 +714,32 @@ class SimpleAnalysisService:
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
 
-    def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents实例
+    def _get_trading_graph(self, config: Dict[str, Any]):
+        """
+        获取或创建TradingAgents实例
 
         ⚠️ 注意：为了避免并发执行时的数据混淆，每次都创建新实例
         虽然这会增加一些初始化开销，但可以确保线程安全
 
-        TradingAgentsGraph 实例包含可变状态（self.ticker, self.curr_state等），
-        如果多个线程共享同一个实例，会导致数据混淆。
+        解耦阶段三：通过适配器接口创建引擎实例
+        每次都创建新实例，避免多线程共享状态
         """
-        # 🔧 [并发安全] 每次都创建新实例，避免多线程共享状态
-        # 不再使用缓存，因为 TradingAgentsGraph 有可变的实例变量
-        logger.info(f"🔧 创建新的TradingAgents实例（并发安全模式）...")
+        # 通过引擎管理器获取主引擎
+        logger.info(f"[适配器模式] 创建引擎实例（每次创建新实例）")
 
-        trading_graph = TradingAgentsGraph(
+        engine = self._engine_manager.get_primary_engine()
+        if engine is None:
+            raise RuntimeError("没有可用的分析引擎")
+
+        # 初始化引擎
+        engine.initialize(
             selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
             debug=config.get("debug", False),
             config=config
         )
 
-        logger.info(f"✅ TradingAgents实例创建成功（实例ID: {id(trading_graph)}）")
-
-        return trading_graph
+        logger.info(f"[适配器模式] 引擎创建成功: {engine.name}")
+        return engine
 
     async def create_analysis_task(
         self,

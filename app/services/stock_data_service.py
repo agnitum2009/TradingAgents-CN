@@ -55,19 +55,43 @@ class StockDataService:
                 query["source"] = source
                 doc = await db[self.basic_info_collection].find_one(query, {"_id": 0})
             else:
-                # 🔥 未指定数据源，按优先级查询
-                source_priority = ["tushare", "multi_source", "akshare", "baostock"]
-                doc = None
+                # 🔥 性能优化：使用聚合管道一次性按优先级查询（避免 N+1 问题）
+                source_priority = {"tushare": 1, "multi_source": 2, "akshare": 3, "baostock": 4}
 
-                for src in source_priority:
-                    query_with_source = query.copy()
-                    query_with_source["source"] = src
-                    doc = await db[self.basic_info_collection].find_one(query_with_source, {"_id": 0})
-                    if doc:
-                        logger.debug(f"✅ 使用数据源: {src}")
-                        break
+                pipeline = [
+                    {
+                        "$match": {
+                            "$or": [{"symbol": symbol6}, {"code": symbol6}]
+                        }
+                    },
+                    {
+                        "$addFields": {
+                            "sourcePriority": {
+                                "$switch": {
+                                    "branches": [
+                                        {"case": {"$eq": ["$source", "tushare"]}, "then": 1},
+                                        {"case": {"$eq": ["$source", "multi_source"]}, "then": 2},
+                                        {"case": {"$eq": ["$source", "akshare"]}, "then": 3},
+                                        {"case": {"$eq": ["$source", "baostock"]}, "then": 4}
+                                    ],
+                                    "default": 999
+                                }
+                            }
+                        }
+                    },
+                    {"$sort": {"sourcePriority": 1}},
+                    {"$limit": 1},
+                    {"$project": {"_id": 0, "sourcePriority": 0}}
+                ]
 
-                # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+                cursor = db[self.basic_info_collection].aggregate(pipeline)
+                results = await cursor.to_list(length=1)
+                doc = results[0] if results else None
+
+                if doc:
+                    logger.debug(f"✅ 使用数据源: {doc.get('source')}")
+
+                # 如果聚合管道没有结果，尝试不带 source 条件查询（兼容旧数据）
                 if not doc:
                     doc = await db[self.basic_info_collection].find_one(
                         {"$or": [{"symbol": symbol6}, {"code": symbol6}]},

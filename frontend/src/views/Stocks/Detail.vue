@@ -109,19 +109,54 @@
 
     <el-row :gutter="16" class="body">
       <el-col :span="18">
-        <!-- K线蜡烛图 -->
+        <!-- K线蜡烛图 / 缠论分析 -->
         <el-card shadow="hover">
           <template #header>
             <div class="card-hd">
-              <div>价格K线</div>
+              <div class="chart-type-selector">
+                <el-radio-group v-model="chartType" size="small">
+                  <el-radio-button value="kline">价格K线</el-radio-button>
+                  <el-radio-button value="chanlun">缠论分析</el-radio-button>
+                  <el-radio-button value="lightweight">TradingView</el-radio-button>
+                </el-radio-group>
+              </div>
               <div class="periods">
                 <el-segmented v-model="period" :options="periodOptions" size="small" />
               </div>
             </div>
           </template>
-          <div class="kline-container">
+          <!-- 普通K线图 -->
+          <div v-if="chartType === 'kline'" class="kline-container">
             <v-chart class="k-chart" :option="kOption" autoresize />
             <div class="legend">当前周期：{{ period }} · 数据源：{{ klineSource || '-' }} · 最近：{{ lastKTime || '-' }} · 收：{{ fmtPrice(lastKClose) }}</div>
+          </div>
+          <!-- 缠论分析图 -->
+          <div v-else-if="chartType === 'chanlun'" class="kline-container">
+            <div v-if="chanlunLoading" class="loading-wrapper">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>正在分析缠论数据...</span>
+            </div>
+            <div v-else-if="chanlunError" class="error-wrapper">
+              <el-icon><Warning /></el-icon>
+              <span>{{ chanlunError }}</span>
+              <el-button size="small" @click="fetchChanlunData">重试</el-button>
+            </div>
+            <v-chart v-else class="k-chart" :option="chanlunOption" autoresize />
+            <div class="legend">
+              缠论分析 · 当前周期：{{ period }} · 笔数：{{ chanlunData?.bi_lines?.length || 0 }} · 线段：{{ chanlunData?.seg_lines?.length || 0 }} · 中枢：{{ chanlunData?.zs_boxes?.length || 0 }}
+            </div>
+          </div>
+          <!-- TradingView Lightweight Charts -->
+          <div v-else class="lightweight-container">
+            <ChanLunLightweightChart
+              ref="lightweightChartRef"
+              :stock-code="code"
+              :period="periodLabelToParam(period)"
+              :days="365"
+              :height="400"
+              @data-loaded="onLightweightDataLoaded"
+              @error="onLightweightError"
+            />
           </div>
         </el-card>
 
@@ -359,15 +394,16 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete } from '@element-plus/icons-vue'
+import { TrendCharts, Star, Refresh, Link, Document, Clock, Reading, CreditCard, Delete, Loading, Warning } from '@element-plus/icons-vue'
 import { marked } from 'marked'
 import { stocksApi } from '@/api/stocks'
 import { analysisApi } from '@/api/analysis'
 import { ApiClient } from '@/api/request'
 import { stockSyncApi } from '@/api/stockSync'
 import { clearAllCache } from '@/api/cache'
+import { getChanlunKline } from '@/api/chanlun'
 import { use as echartsUse } from 'echarts/core'
-import { CandlestickChart } from 'echarts/charts'
+import { CandlestickChart, LineChart, ScatterChart } from 'echarts/charts'
 
 import { GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -375,9 +411,10 @@ import VChart from 'vue-echarts'
 import type { EChartsOption } from 'echarts'
 import { favoritesApi } from '@/api/favorites'
 import { useNotificationStore } from '@/stores/notifications'
+import ChanLunLightweightChart from '@/components/ChanLunLightweightChart.vue'
 
 
-echartsUse([CandlestickChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
+echartsUse([CandlestickChart, LineChart, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, LegendComponent, TitleComponent, CanvasRenderer])
 
 const route = useRoute()
 const router = useRouter()
@@ -457,6 +494,36 @@ const kOption = ref<EChartsOption>({
 })
 const lastKTime = ref<string | null>(null)
 const lastKClose = ref<number | null>(null)
+
+// 缠论分析相关变量
+const chartType = ref<'kline' | 'chanlun' | 'lightweight'>('kline')
+const chanlunData = ref<any>(null)
+const chanlunLoading = ref(false)
+const chanlunError = ref<string | null>(null)
+
+// Lightweight Charts 组件引用
+const lightweightChartRef = ref<InstanceType<typeof ChanLunLightweightChart> | null>(null)
+
+// 缠论图表配置
+const chanlunOption = ref<EChartsOption>({
+  grid: { left: 50, right: 50, top: 30, bottom: 60 },
+  xAxis: {
+    type: 'category',
+    data: [],
+    boundaryGap: true,
+    axisLine: { onZero: false },
+    axisLabel: { show: true }
+  },
+  yAxis: {
+    scale: true,
+    type: 'value'
+  },
+  dataZoom: [
+    { type: 'inside', start: 0, end: 100 },
+    { start: 0, end: 100 }
+  ],
+  series: []
+})
 
 // 报价（初始化）
 const quote = reactive({
@@ -807,6 +874,278 @@ async function fetchKline() {
   } catch (e) {
     console.error('获取K线失败', e)
   }
+}
+
+// 获取缠论分析数据
+async function fetchChanlunData() {
+  if (chartType.value !== 'chanlun') return
+
+  chanlunLoading.value = true
+  chanlunError.value = null
+  try {
+    const param = periodLabelToParam(period.value)
+    const res: any = await getChanlunKline(code.value, {
+      period: param,
+      days: 365,
+      data_source: 'akshare',
+      x_range: 500  // 限制返回的K线数量，避免数据过多
+    })
+
+    const data = res?.data
+    chanlunData.value = data
+
+    console.log('ECharts 缠论数据:', {
+      klineCount: data?.klines?.length || 0,
+      biCount: data?.bi_lines?.length || 0,
+      segCount: data?.seg_lines?.length || 0,
+      zsCount: data?.zs_boxes?.length || 0,
+      bspCount: data?.bsp_list?.length || 0
+    })
+
+    // 构建缠论图表配置
+    buildChanlunChart(data)
+  } catch (e: any) {
+    console.error('获取缠论数据失败', e)
+    chanlunError.value = e?.message || '获取缠论数据失败'
+  } finally {
+    chanlunLoading.value = false
+  }
+}
+
+// 构建缠论图表配置
+function buildChanlunChart(data: any) {
+  const klines: any[] = data?.klines || []
+  const biLines: any[] = data?.bi_lines || []
+  const segLines: any[] = data?.seg_lines || []
+  const zsBoxes: any[] = data?.zs_boxes || []
+  const bspList: any[] = data?.bsp_list || []
+
+  const category: string[] = []
+  const candleValues: number[][] = []
+
+  for (const k of klines) {
+    category.push(k.time)
+    candleValues.push([k.open, k.close, k.low, k.high])
+  }
+
+  // 构建笔的 markLine 数据 - API返回: begin_x, end_x, begin_y, end_y
+  // 对于 category 轴，使用索引而不是类目名称
+  const biMarkLineData: any[] = []
+  for (const bi of biLines) {
+    // 检查索引是否在范围内
+    if (bi.begin_x < category.length && bi.end_x < category.length) {
+      biMarkLineData.push([
+        { coord: [bi.begin_x, bi.begin_y] },
+        { coord: [bi.end_x, bi.end_y] }
+      ])
+    } else {
+      console.warn('笔线条索引越界:', bi, 'category长度:', category.length)
+    }
+  }
+
+  // 构建线段的 markLine 数据 - API返回: begin_x, end_x, begin_y, end_y
+  const segMarkLineData: any[] = []
+  for (const seg of segLines) {
+    if (seg.end_x !== null && seg.begin_x < category.length && seg.end_x < category.length) {
+      segMarkLineData.push([
+        { coord: [seg.begin_x, seg.begin_y] },
+        { coord: [seg.end_x, seg.end_y] }
+      ])
+    } else if (seg.end_x !== null) {
+      console.warn('线段索引越界:', seg, 'category长度:', category.length)
+    }
+  }
+
+  // 构建中枢区域 - API返回: begin, end, low, high
+  // 对于 category 轴，使用索引而不是类目名称
+  const zsAreas: any[] = []
+  for (const zs of zsBoxes) {
+    if (zs.end !== null && zs.begin < category.length && zs.end < category.length) {
+      zsAreas.push([
+        {
+          name: '中枢',
+          xAxis: zs.begin,
+          yAxis: zs.high,
+          itemStyle: { color: 'rgba(255, 212, 59, 0.15)' }
+        },
+        {
+          xAxis: zs.end,
+          yAxis: zs.low
+        }
+      ])
+    } else if (zs.end !== null) {
+      console.warn('中枢索引越界:', zs, 'category长度:', category.length)
+    }
+  }
+
+  // 构建买卖点散点数据
+  const buyPoints: any[] = []
+  const sellPoints: any[] = []
+  for (const bsp of bspList) {
+    if (bsp.x < category.length) {
+      const point = [bsp.x, bsp.y]  // 使用索引
+      if (bsp.is_buy) {
+        buyPoints.push(point)
+      } else {
+        sellPoints.push(point)
+      }
+    } else {
+      console.warn('买卖点索引越界:', bsp, 'category长度:', category.length)
+    }
+  }
+
+  console.log('ECharts markLine 数据:', {
+    biCount: biMarkLineData.length,
+    segCount: segMarkLineData.length,
+    zsCount: zsAreas.length,
+    buyPoints: buyPoints.length,
+    sellPoints: sellPoints.length,
+    biSample: biMarkLineData[0],
+    segSample: segMarkLineData[0],
+    categoryLength: category.length,
+    categoryFirst: category[0],
+    categoryLast: category[category.length - 1]
+  })
+
+  const series: any[] = [
+    {
+      type: 'candlestick',
+      name: 'K线',
+      data: candleValues,
+      itemStyle: {
+        color: '#ef4444',
+        color0: '#16a34a',
+        borderColor: '#ef4444',
+        borderColor0: '#16a34a'
+      }
+    }
+  ]
+
+  // 添加中枢区域 (z最低，在底层)
+  if (zsAreas.length > 0) {
+    series.push({
+      type: 'scatter',
+      name: '中枢',
+      data: [],
+      markArea: {
+        silent: false,
+        data: zsAreas
+      },
+      z: 1
+    })
+  }
+
+  // 添加线段
+  if (segMarkLineData.length > 0) {
+    series.push({
+      type: 'line',
+      name: '线段',
+      data: new Array(category.length).fill(null),  // 使用 null 数组而不是空数组
+      markLine: {
+        symbol: ['none', 'none'],
+        data: segMarkLineData,
+        lineStyle: {
+          width: 3,
+          color: '#51cf66',
+          type: 'solid'
+        },
+        emphasis: { disabled: true },
+        silent: false
+      },
+      z: 3,
+      tooltip: { show: false },
+      showSymbol: false,
+      animation: false
+    })
+  }
+
+  // 添加笔
+  if (biMarkLineData.length > 0) {
+    series.push({
+      type: 'line',
+      name: '笔',
+      data: new Array(category.length).fill(null),  // 使用 null 数组而不是空数组
+      markLine: {
+        symbol: ['none', 'none'],
+        data: biMarkLineData,
+        lineStyle: {
+          width: 1.5,
+          color: '#d32f2f'
+        },
+        emphasis: { disabled: true },
+        silent: false
+      },
+      z: 4,
+      tooltip: { show: false },
+      showSymbol: false,
+      animation: false
+    })
+  }
+
+  // 添加买点
+  if (buyPoints.length > 0) {
+    series.push({
+      type: 'scatter',
+      name: '买点',
+      data: buyPoints,
+      symbolSize: 12,
+      symbol: 'triangle',
+      itemStyle: { color: '#1971c2' },
+      z: 10
+    })
+  }
+
+  // 添加卖点
+  if (sellPoints.length > 0) {
+    series.push({
+      type: 'scatter',
+      name: '卖点',
+      data: sellPoints,
+      symbolSize: 12,
+      symbol: 'triangle',
+      symbolRotate: 180,
+      itemStyle: { color: '#e03131' },
+      z: 10
+    })
+  }
+
+  chanlunOption.value = {
+    ...chanlunOption.value,
+    xAxis: { type: 'category', data: category, boundaryGap: true },
+    yAxis: { scale: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' }
+    },
+    legend: {
+      data: ['K线', '中枢', '线段', '笔', '买点', '卖点'].filter(name => {
+        if (name === '中枢') return zsAreas.length > 0
+        if (name === '线段') return segMarkLineData.length > 0
+        if (name === '笔') return biMarkLineData.length > 0
+        if (name === '买点') return buyPoints.length > 0
+        if (name === '卖点') return sellPoints.length > 0
+        return true
+      })
+    },
+    series: series
+  }
+}
+
+// 当图表类型或周期切换时
+watch([chartType, period], () => {
+  if (chartType.value === 'chanlun') {
+    fetchChanlunData()
+  }
+})
+
+// Lightweight Charts 事件处理
+function onLightweightDataLoaded(data: any) {
+  console.log('Lightweight Charts 数据加载成功:', data)
+}
+
+function onLightweightError(error: string) {
+  console.error('Lightweight Charts 加载错误:', error)
+  ElMessage.error(`TradingView 图表加载失败: ${error}`)
 }
 
 
@@ -1209,6 +1548,16 @@ function exportReport() {
 .k-chart { height: 320px; }
 .legend { margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 
+.kline-container,
+.lightweight-container {
+  min-height: 400px;
+}
+
+.lightweight-container {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
 .news-card .news-list { display: flex; flex-direction: column; }
 .news-item { padding: 10px 12px; border-bottom: 1px solid var(--el-border-color-lighter); transition: background-color .2s ease; }
 .news-item:last-child { border-bottom: none; }
@@ -1501,5 +1850,38 @@ function exportReport() {
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+/* 图表类型选择器 */
+.chart-type-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 加载和错误状态 */
+.loading-wrapper,
+.error-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+  color: var(--el-text-color-secondary);
+}
+
+.loading-wrapper .el-icon {
+  font-size: 32px;
+  color: var(--el-color-primary);
+}
+
+.error-wrapper .el-icon {
+  font-size: 32px;
+  color: var(--el-color-danger);
+}
+
+.error-wrapper span {
+  font-size: 14px;
 }
 </style>

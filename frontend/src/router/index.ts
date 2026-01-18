@@ -70,6 +70,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/market-ranking',
+    name: 'MarketRanking',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '盘中排名',
+      icon: 'TrendCharts',
+      requiresAuth: false,  // 允许未登录访问
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'MarketRankingHome',
+        component: () => import('@/views/MarketRanking/index.vue'),
+        meta: {
+          title: '盘中排名',
+          requiresAuth: false  // 允许未登录访问
+        }
+      }
+    ]
+  },
+  {
     path: '/screening',
     name: 'StockScreening',
     component: () => import('@/layouts/BasicLayout.vue'),

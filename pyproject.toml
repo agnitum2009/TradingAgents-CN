@@ -61,6 +61,7 @@ dependencies = [
     "jieba>=0.42.1",
     "pandas>=2.3.0",
     "plotly>=5.0.0",
+    # mplfinance~=0.12.10  # 专业K线图表绘制库（暂时注释，前端用ECharts实现）
 
     # 网络爬虫和解析
     "curl-cffi>=0.6.0",  # 模拟真实浏览器TLS指纹，绕过反爬虫检测

@@ -1,0 +1,39 @@
+# Cargo 国内镜像配置
+# 配置 crates.io 国内镜像源（中国科技大学 sparse 协议）
+
+[source.crates-io]
+# 替换默认源为国内镜像
+replace-with = 'ustc'
+
+# 中国科技大学镜像源（推荐，使用 sparse 协议）
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+# 备用镜像源（按优先级排序）
+# 阿里云镜像
+[source.aliyun]
+registry = "sparse+https://mirrors.aliyun.com/crates.io-index/"
+
+# 清华大学镜像
+[source.tuna]
+registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+# 上海交通大学镜像
+[source.sjtu]
+registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"
+
+# 字节跳动镜像（CDN加速）
+[source.bytedance]
+registry = "https://rsproxy.cn/crates.io-index"
+
+[net]
+# 下载时使用更多并发连接
+git-fetch-with-cli = true
+
+[http]
+# 设置超时时间（秒）
+timeout = 60
+
+[build]
+# 并行编译
+jobs = 4

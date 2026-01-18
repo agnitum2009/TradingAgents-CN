@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
 import sys
+from cachetools import TTLCache  # 🔥 性能优化：导入 TTL 缓存
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -20,9 +21,14 @@ sys.path.insert(0, str(project_root))
 from tradingagents.utils.logging_init import init_logging
 init_logging()
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
+# 解耦阶段三：已移除直接导入 TradingAgentsGraph
+# 原代码: from tradingagents.graph.trading_graph import TradingAgentsGraph
+# 现在通过适配器接口创建引擎实例
 from tradingagents.default_config import DEFAULT_CONFIG
 from app.services.simple_analysis_service import create_analysis_config, get_provider_by_model_name
+
+# 解耦：引入分析引擎适配器
+from app.services.analysis_engine import get_engine_manager
 from app.models.analysis import (
     AnalysisParameters, AnalysisResult, AnalysisTask, AnalysisBatch,
     AnalysisStatus, BatchStatus, SingleAnalysisRequest, BatchAnalysisRequest
@@ -52,9 +58,20 @@ class AnalysisService:
         self.queue_service = QueueService(redis_client)
         # 初始化使用统计服务
         self.usage_service = UsageStatisticsService()
-        self._trading_graph_cache = {}
+
+        # 🔥 性能优化：使用 TTL 缓存替代普通字典，自动清理过期条目
+        # 避免内存无限增长导致的内存泄漏
+        self._trading_graph_cache = TTLCache(
+            maxsize=50,      # 最多缓存 50 个不同配置的引擎实例
+            ttl=3600         # 1小时过期，自动清理
+        )
+
         # 进度跟踪器缓存
         self._progress_trackers: Dict[str, RedisProgressTracker] = {}
+
+        # 解耦阶段三：使用适配器模式
+        # 引擎管理器单例
+        self._engine_manager = get_engine_manager()
 
     def _convert_user_id(self, user_id: str) -> PyObjectId:
         """将字符串用户ID转换为PyObjectId"""
@@ -79,20 +96,31 @@ class AnalysisService:
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
     
-    def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
-        """获取或创建TradingAgents图实例（带缓存）- 与单股分析保持一致"""
+    def _get_trading_graph(self, config: Dict[str, Any]):
+        """
+        获取或创建TradingAgents图实例（带缓存）
+
+        解耦阶段三：通过适配器接口创建引擎实例
+        """
         config_key = json.dumps(config, sort_keys=True)
 
         if config_key not in self._trading_graph_cache:
-            # 直接使用完整配置，不再合并DEFAULT_CONFIG（因为create_analysis_config已经处理了）
-            # 这与单股分析服务和web目录的方式一致
-            self._trading_graph_cache[config_key] = TradingAgentsGraph(
+            logger.info(f"[适配器模式] 创建引擎实例")
+
+            # 通过引擎管理器获取主引擎
+            engine = self._engine_manager.get_primary_engine()
+            if engine is None:
+                raise RuntimeError("没有可用的分析引擎")
+
+            # 初始化引擎
+            engine.initialize(
                 selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
                 debug=config.get("debug", False),
                 config=config
             )
 
-            logger.info(f"创建新的TradingAgents实例: {config.get('llm_provider', 'default')}")
+            self._trading_graph_cache[config_key] = engine
+            logger.info(f"[适配器模式] 引擎创建成功: {engine.name}")
 
         return self._trading_graph_cache[config_key]
 

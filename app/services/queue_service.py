@@ -177,8 +177,43 @@ class QueueService:
             return False
 
     async def create_batch(self, user_id: str, symbols: List[str], params: Dict[str, Any]) -> tuple[str, int]:
+        """
+        创建批量分析任务（性能优化版）
+        使用 Redis Pipeline 批量操作，减少网络往返
+        """
         batch_id = str(uuid.uuid4())
         now = int(time.time())
+
+        # 🔥 性能优化：使用 Redis Pipeline 批量操作（将多个命令合并为一次网络往返）
+        pipe = self.r.pipeline(transaction=True)
+
+        task_ids = []
+        params_json = json.dumps(params or {})
+
+        for symbol in symbols:
+            task_id = str(uuid.uuid4())
+            task_ids.append(task_id)
+
+            key = TASK_PREFIX + task_id
+
+            # 批量添加到 pipeline（不立即执行）
+            pipe.hset(key, mapping={
+                "id": task_id,
+                "user": user_id,
+                "symbol": symbol,
+                "status": "queued",
+                "created_at": str(now),
+                "params": params_json,
+                "enqueued_at": str(now),
+                "batch_id": batch_id
+            })
+            pipe.lpush(READY_LIST, task_id)
+            pipe.sadd(BATCH_TASKS_PREFIX + batch_id, task_id)
+
+        # 一次性执行所有命令（原子性事务）
+        await pipe.execute()
+
+        # 批量保存批次信息
         batch_key = BATCH_PREFIX + batch_id
         await self.r.hset(batch_key, mapping={
             "id": batch_id,
@@ -187,8 +222,8 @@ class QueueService:
             "submitted": str(len(symbols)),
             "created_at": str(now),
         })
-        for s in symbols:
-            await self.enqueue_task(user_id=user_id, symbol=s, params=params, batch_id=batch_id)
+
+        logger.info(f"✅ 批量任务已入队: {batch_id} - {len(symbols)}个股票 (Pipeline优化)")
         return batch_id, len(symbols)
 
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:

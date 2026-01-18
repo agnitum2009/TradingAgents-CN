@@ -1,12 +1,25 @@
 """
 实时估值指标计算模块
 基于实时行情和财务数据计算PE/PB等指标
+
+集成 Rust 性能优化:
+- 优先使用 tacn_financial 模块进行财务计算
+- Rust 失败时自动降级到 Python 实现
 """
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# 导入 Rust 后端适配器（优先使用 Rust 实现）
+try:
+    from app.utils.rust_backend import calculate_financial_metrics, batch_calculate_pe_pb, get_module_stats
+    RUST_BACKEND_AVAILABLE = True
+    logger.info("✅ [Rust后端] 财务计算模块加载成功")
+except ImportError as e:
+    RUST_BACKEND_AVAILABLE = False
+    logger.warning(f"⚠️ [Rust后端] 财务计算模块未加载: {e}")
 
 
 def calculate_realtime_pe_pb(
@@ -296,14 +309,38 @@ def calculate_realtime_pe_pb(
         return None
 
 
+def _python_calculate_pe_pb(
+    price: float,
+    eps: Optional[float] = None,
+    bps: Optional[float] = None
+) -> Dict[str, Optional[float]]:
+    """
+    Python PE/PB 计算实现（降级）
+
+    Args:
+        price: 股价
+        eps: 每股收益
+        bps: 每股净资产
+
+    Returns:
+        {"pe_ratio": ..., "pb_ratio": ...}
+    """
+    result = {"pe_ratio": None, "pb_ratio": None}
+    if eps is not None and eps > 0:
+        result["pe_ratio"] = price / eps
+    if bps is not None and bps > 0:
+        result["pb_ratio"] = price / bps
+    return result
+
+
 def validate_pe_pb(pe: Optional[float], pb: Optional[float]) -> bool:
     """
     验证PE/PB是否在合理范围内
-    
+
     Args:
         pe: 市盈率
         pb: 市净率
-    
+
     Returns:
         bool: 是否合理
     """
@@ -311,13 +348,44 @@ def validate_pe_pb(pe: Optional[float], pb: Optional[float]) -> bool:
     if pe is not None and (pe < -100 or pe > 1000):
         logger.warning(f"PE异常: {pe}")
         return False
-    
+
     # PB合理范围：0.1 到 100
     if pb is not None and (pb < 0.1 or pb > 100):
         logger.warning(f"PB异常: {pb}")
         return False
-    
+
     return True
+
+
+def calculate_pe_pb_with_rust(
+    price: float,
+    eps: Optional[float] = None,
+    bps: Optional[float] = None
+) -> Dict[str, Optional[float]]:
+    """
+    使用 Rust 后端计算 PE/PB（自动降级到 Python）
+
+    Args:
+        price: 股价
+        eps: 每股收益
+        bps: 每股净资产
+
+    Returns:
+        {"pe_ratio": ..., "pb_ratio": ...}
+    """
+    if RUST_BACKEND_AVAILABLE:
+        try:
+            # 使用 Rust 后端的批量计算函数（单个元素）
+            result = batch_calculate_pe_pb([price], [eps], [bps])
+            pe = result["pe_ratios"][0] if result["pe_ratios"] else None
+            pb = result["pb_ratios"][0] if result["pb_ratios"] else None
+            logger.debug(f"✅ [Rust后端] PE/PB 计算成功: PE={pe}, PB={pb}")
+            return {"pe_ratio": pe, "pb_ratio": pb}
+        except Exception as e:
+            logger.warning(f"⚠️ [Rust后端] PE/PB 计算失败，降级到 Python: {e}")
+
+    # Python 降级
+    return _python_calculate_pe_pb(price, eps, bps)
 
 
 def get_pe_pb_with_fallback(

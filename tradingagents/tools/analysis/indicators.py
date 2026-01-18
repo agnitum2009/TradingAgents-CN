@@ -2,9 +2,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
+import logging
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# ============================================
+# Rust 后端集成 (性能优化)
+# ============================================
+_RUST_BACKEND_AVAILABLE = False
+_rust_indicators = None
+
+try:
+    from app.utils.rust_backend import (
+        calculate_sma, calculate_ema, calculate_rsi,
+        is_rust_available, get_module_stats
+    )
+    _RUST_BACKEND_AVAILABLE = is_rust_available("indicators")
+    if _RUST_BACKEND_AVAILABLE:
+        logger.info("✅ [Rust后端] 技术指标模块已加载")
+except ImportError:
+    logger.debug("⚠️ [Rust后端] 技术指标模块未安装，使用 Pandas 实现")
 
 
 @dataclass(frozen=True)
@@ -14,6 +34,26 @@ class IndicatorSpec:
 
 
 SUPPORTED = {"ma", "ema", "macd", "rsi", "boll", "atr", "kdj"}
+
+
+def _to_list(series: pd.Series) -> List[float]:
+    """将 pandas Series 转换为纯 Python 列表（用于 Rust 后端）"""
+    return series.astype(float).fillna(0).tolist()
+
+
+def _from_list(data: List[Optional[float]], index: Any) -> pd.Series:
+    """将 Python 列表转换回 pandas Series"""
+    return pd.Series(data, index=index)
+
+
+def _use_rust_for_large_data(series: pd.Series, threshold: int = 1000) -> bool:
+    """
+    判断是否使用 Rust 后端
+
+    对于大数据集（> threshold 点），Rust 后端性能更优
+    对于小数据集，pandas 已经足够快，直接使用 pandas 避免转换开销
+    """
+    return _RUST_BACKEND_AVAILABLE and len(series) > threshold
 
 
 def _require_cols(df: pd.DataFrame, cols: Iterable[str]):
@@ -33,9 +73,23 @@ def ma(close: pd.Series, n: int, min_periods: int = None) -> pd.Series:
 
     Returns:
         移动平均线序列
+
+    性能优化：
+        - 大数据集（>1000点）：自动使用 Rust 后端
+        - 小数据集：使用 pandas（避免转换开销）
     """
     if min_periods is None:
         min_periods = 1  # 默认为1，与现有代码保持一致
+
+    # Rust 后端加速（仅大数据集）
+    if _use_rust_for_large_data(close):
+        try:
+            close_list = _to_list(close)
+            result_list = calculate_sma(close_list, n)
+            return _from_list(result_list, close.index)
+        except Exception as e:
+            logger.debug(f"Rust SMA 计算失败，降级到 pandas: {e}")
+
     return close.rolling(window=int(n), min_periods=min_periods).mean()
 
 
@@ -49,7 +103,20 @@ def ema(close: pd.Series, n: int) -> pd.Series:
 
     Returns:
         指数移动平均线序列
+
+    性能优化：
+        - 大数据集（>1000点）：自动使用 Rust 后端
+        - 小数据集：使用 pandas（避免转换开销）
     """
+    # Rust 后端加速（仅大数据集）
+    if _use_rust_for_large_data(close):
+        try:
+            close_list = _to_list(close)
+            result_list = calculate_ema(close_list, n)
+            return _from_list(result_list, close.index)
+        except Exception as e:
+            logger.debug(f"Rust EMA 计算失败，降级到 pandas: {e}")
+
     return close.ewm(span=int(n), adjust=False).mean()
 
 
@@ -94,7 +161,20 @@ def rsi(close: pd.Series, n: int = 14, method: str = 'ema') -> pd.Series:
         - 'ema': 使用 ewm(alpha=1/n, adjust=False)，适用于国际市场
         - 'sma': 使用 rolling(window=n).mean()，简单移动平均
         - 'china': 使用 ewm(com=n-1, adjust=True)，与同花顺/通达信一致
+
+    性能优化：
+        - 大数据集（>1000点）且 method='ema'：自动使用 Rust 后端
+        - 其他情况：使用 pandas
     """
+    # Rust 后端加速（仅大数据集 + EMA 方法）
+    if _use_rust_for_large_data(close) and method == 'ema':
+        try:
+            close_list = _to_list(close)
+            result_list = calculate_rsi(close_list, n)
+            return _from_list(result_list, close.index)
+        except Exception as e:
+            logger.debug(f"Rust RSI 计算失败，降级到 pandas: {e}")
+
     delta = close.diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta < 0, 0)

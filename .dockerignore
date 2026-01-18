@@ -106,6 +106,7 @@ coverage/
 # 文档（保留部署与前端需要的文档）
 # 默认忽略所有 Markdown，但为前端构建需要的目录开白名单
 *.md
+!VERSION
 !README.md
 !docs/docker_deployment_guide.md
 !docs/auth_system_improvement.md

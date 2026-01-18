@@ -37,6 +37,11 @@
       <template #title>任务中心</template>
     </el-menu-item>
 
+    <el-menu-item index="/market-ranking">
+      <el-icon><TrendCharts /></el-icon>
+      <template #title>盘中排名</template>
+    </el-menu-item>
+
     <el-menu-item index="/screening">
       <el-icon><Search /></el-icon>
       <template #title>股票筛选</template>

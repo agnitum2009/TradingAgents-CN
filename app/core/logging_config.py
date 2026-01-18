@@ -7,6 +7,13 @@ import platform
 
 from app.core.logging_context import LoggingContextFilter, trace_id_var
 
+# 🔥 性能优化：根据环境自动设置日志级别
+_ENV = os.getenv("ENV", "development").lower()
+_PRODUCTION = _ENV in ("production", "prod")
+
+# 生产环境默认 WARNING，开发环境默认 DEBUG
+_DEFAULT_LOG_LEVEL = "WARNING" if _PRODUCTION else "DEBUG"
+
 # 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
 _IS_WINDOWS = platform.system() == "Windows"
 if _IS_WINDOWS:
@@ -63,12 +70,25 @@ def _parse_size(size_str: str) -> int:
             return 10 * 1024 * 1024
     return 10 * 1024 * 1024
 
-def setup_logging(log_level: str = "INFO"):
+def setup_logging(log_level: str = None):
     """
-    设置应用日志配置：
-    1) 优先尝试从 config/logging.toml 读取并转化为 dictConfig
-    2) 失败或不存在时，回退到内置默认配置
+    设置应用日志配置（性能优化版）
+
+    优化点：
+    - 根据环境自动设置合适的日志级别
+    - 生产环境默认 WARNING，减少日志输出
+    - 开发环境默认 DEBUG，便于调试
+
+    Args:
+        log_level: 可选，显式指定日志级别（覆盖默认值）
     """
+    # 🔥 性能优化：使用环境感知的默认日志级别
+    if log_level is None:
+        log_level = _DEFAULT_LOG_LEVEL
+
+    logger = logging.getLogger("webapi")
+    logger.info(f"🔧 [setup_logging] 环境={_ENV}, 生产模式={_PRODUCTION}, 日志级别={log_level}")
+
     # 1) 若存在 TOML 配置且可解析，则优先使用
     try:
         cfg_path = resolve_logging_cfg_path()
@@ -412,10 +432,27 @@ def setup_logging(log_level: str = "INFO"):
             },
         },
         "loggers": {
-            "webapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": True},
-            "worker": {"level": "DEBUG", "handlers": ["console", "worker_file", "error_file"], "propagate": False},
-            "uvicorn": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
-            "fastapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
+            # 🔥 性能优化：根据环境使用不同日志级别
+            "webapi": {
+                "level": "WARNING" if _PRODUCTION else "INFO",
+                "handlers": ["console", "file", "error_file"],
+                "propagate": True
+            },
+            "worker": {
+                "level": "INFO" if _PRODUCTION else "DEBUG",
+                "handlers": ["console", "worker_file", "error_file"],
+                "propagate": False
+            },
+            "uvicorn": {
+                "level": "WARNING" if _PRODUCTION else "INFO",
+                "handlers": ["console", "file", "error_file"],
+                "propagate": False
+            },
+            "fastapi": {
+                "level": "WARNING" if _PRODUCTION else "INFO",
+                "handlers": ["console", "file", "error_file"],
+                "propagate": False
+            },
         },
         "root": {"level": log_level, "handlers": ["console"]},
     }

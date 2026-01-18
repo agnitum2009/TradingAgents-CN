@@ -30,18 +30,18 @@ def init_logging(config_override: Optional[dict] = None) -> None:
     logger = get_logger('tradingagents.init')
     
     # 记录初始化信息
-    logger.info("🚀 TradingAgents-CN 日志系统初始化完成")
-    logger.info(f"📁 日志目录: {logger_manager.config.get('handlers', {}).get('file', {}).get('directory', 'N/A')}")
-    logger.info(f"📊 日志级别: {logger_manager.config.get('level', 'INFO')}")
-    
+    logger.info("TradingAgents-CN 日志系统初始化完成")
+    logger.info(f"日志目录: {logger_manager.config.get('handlers', {}).get('file', {}).get('directory', 'N/A')}")
+    logger.info(f"日志级别: {logger_manager.config.get('level', 'INFO')}")
+
     # Docker环境特殊处理
     if logger_manager.config.get('docker', {}).get('enabled', False):
-        logger.info("🐳 Docker环境检测到，使用容器优化配置")
-    
+        logger.info("Docker环境检测到，使用容器优化配置")
+
     # 记录环境信息
-    logger.debug(f"🔧 Python版本: {sys.version}")
-    logger.debug(f"📂 工作目录: {os.getcwd()}")
-    logger.debug(f"🌍 环境变量: DOCKER_CONTAINER={os.getenv('DOCKER_CONTAINER', 'false')}")
+    logger.debug(f"Python版本: {sys.version}")
+    logger.debug(f"工作目录: {os.getcwd()}")
+    logger.debug(f"环境变量: DOCKER_CONTAINER={os.getenv('DOCKER_CONTAINER', 'false')}")
 
 
 def get_session_logger(session_id: str, module_name: str = 'session') -> 'logging.Logger':
@@ -89,15 +89,15 @@ def get_session_logger(session_id: str, module_name: str = 'session') -> 'loggin
 def log_startup_info():
     """记录应用启动信息"""
     logger = get_logger('tradingagents.startup')
-    
+
     logger.info("=" * 60)
-    logger.info("🎯 TradingAgents-CN 启动")
+    logger.info("TradingAgents-CN 启动")
     logger.info("=" * 60)
-    
+
     # 系统信息
     import platform
-    logger.info(f"🖥️  系统: {platform.system()} {platform.release()}")
-    logger.info(f"🐍 Python: {platform.python_version()}")
+    logger.info(f"系统: {platform.system()} {platform.release()}")
+    logger.info(f"Python: {platform.python_version()}")
     
     # 环境信息
     env_info = {

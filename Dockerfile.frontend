@@ -1,4 +1,4 @@
-# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v1.0.0-preview)
+# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v1.0.3)
 # 前后端分离架构 - 前端服务
 
 # 构建阶段：使用Node.js 22.x（与项目开发环境一致）
@@ -7,15 +7,11 @@ FROM node:22-alpine AS build
 ENV NODE_ENV=production
 WORKDIR /app/frontend
 
-# 启用Corepack并使用Yarn 1.22.22（项目使用的包管理器）
-RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+# 复制package.json和package-lock.json
+COPY frontend/package.json frontend/package-lock.json  ./
 
-# 复制package.json、yarn.lock和.yarnrc（配置国内镜像源）
-COPY frontend/package.json frontend/yarn.lock  ./
-
-# 安装依赖（使用yarn.lock确保版本一致）
-# 增加网络超时时间到5分钟，适应跨平台构建的网络延迟
-RUN yarn install --frozen-lockfile --production=false --network-timeout 300000 --registry https://registry.yarnpkg.com
+# 安装依赖（使用npm）
+RUN npm ci --production=false --registry=https://registry.npmmirror.com
 
 # 复制前端源代码
 COPY frontend/. ./
@@ -26,8 +22,8 @@ COPY frontend/. ./
 COPY assets /app/frontend/public/assets
 COPY docs /app/docs
 
-# 构建生产版本（跳过类型检查以加快构建速度）
-RUN yarn vite build
+# 构建生产版本（跳过类型检查）
+RUN npm run build
 
 # 运行阶段：使用Nginx提供静态文件服务
 FROM nginx:alpine AS runtime

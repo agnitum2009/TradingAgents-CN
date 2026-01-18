@@ -15,23 +15,39 @@ redis_client: Optional[redis.Redis] = None
 
 
 async def init_redis():
-    """初始化Redis连接"""
+    """
+    初始化Redis连接（性能优化版）
+
+    优化点：
+    - 增加最大连接数到 50
+    - 优化超时配置
+    - 增强连接健康检查
+    """
     global redis_pool, redis_client
 
     try:
-        # 创建连接池
+        # 🔥 性能优化：创建连接池，优化并发性能
         redis_pool = redis.ConnectionPool.from_url(
             settings.REDIS_URL,
-            max_connections=settings.REDIS_MAX_CONNECTIONS,  # 使用配置文件中的值
-            retry_on_timeout=settings.REDIS_RETRY_ON_TIMEOUT,
-            decode_responses=True,
-            socket_keepalive=True,  # 启用 TCP keepalive
+            # 连接池大小优化
+            max_connections=50,  # 增加最大连接数，支持更高并发
+            # 超时配置优化
+            socket_connect_timeout=5,  # 连接超时 5 秒
+            socket_timeout=5,           # 读写超时 5 秒
+            # 连接保持优化
+            socket_keepalive=True,
             socket_keepalive_options={
                 1: 60,  # TCP_KEEPIDLE: 60秒后开始发送keepalive探测
                 2: 10,  # TCP_KEEPINTVL: 每10秒发送一次探测
                 3: 3,   # TCP_KEEPCNT: 最多发送3次探测
             },
+            # 健康检查优化
             health_check_interval=30,  # 每30秒检查一次连接健康状态
+            # 重试配置
+            retry_on_timeout=True,
+            retry=Retry(NoBackoff(), 3),  # 最多重试3次
+            # 编码配置
+            decode_responses=True,
         )
 
         # 创建Redis客户端
@@ -39,7 +55,7 @@ async def init_redis():
 
         # 测试连接
         await redis_client.ping()
-        logger.info(f"✅ Redis连接成功建立 (max_connections={settings.REDIS_MAX_CONNECTIONS})")
+        logger.info(f"✅ Redis连接成功建立 (max_connections=50)")
 
     except Exception as e:
         logger.error(f"❌ Redis连接失败: {e}")
