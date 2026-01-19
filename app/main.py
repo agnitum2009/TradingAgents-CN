@@ -17,8 +17,8 @@ from fastapi import FastAPI, Request
 from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-# P2-3: 导入性能监控中间件
-from app.middleware.performance_monitor import PerformanceMonitorMiddleware
+# Phase 3-07: 导入增强型性能监控中间件 (P95/P99)
+from app.middleware.performance_monitor_v2 import PerformanceMonitorMiddleware as PerformanceMonitorMiddlewareV2
 import uvicorn
 import logging
 import time
@@ -31,7 +31,10 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
 from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, market_news as market_news_router
-# from app.routers import market_ranking as market_ranking_router  # 临时注释，排查问题
+from app.routers import market_ranking as market_ranking_router
+# Phase 3-07: 性能监控面板路由
+from app.routers import monitoring as monitoring_router
+from app.routers.daily_analysis import router as daily_analysis_router
 from app.routers import chanlun as chanlun_router
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
@@ -233,17 +236,22 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
-    # 🔥 性能优化：初始化数据库索引
+    # 🔥 性能优化：初始化数据库索引 (Phase 3-06: 增强型索引管理)
     try:
         from app.services.database_index_service import DatabaseIndexService
         from app.services.wordcloud_cache_service import WordcloudCacheService
+        # Phase 3-06: 使用增强型索引管理器
+        from app.core.database_indexes import init_database_indexes
         index_result = await DatabaseIndexService.ensure_indexes()
         await WordcloudCacheService.ensure_indexes()
+        # Phase 3-06: 增强型索引管理（包含索引分析和优化建议）
+        enhanced_result = await init_database_indexes(force_rebuild=False)
         logger.info(
             f"✅ 数据库索引初始化完成: "
             f"新建={len(index_result['created'])}, "
             f"已存在={len(index_result['existing'])}, "
-            f"失败={len(index_result['failed'])}"
+            f"失败={len(index_result['failed'])}, "
+            f"Phase3增强={enhanced_result.get('total_indexes', 0)}个索引"
         )
     except Exception as e:
         logger.warning(f"⚠️ 数据库索引初始化失败（跳过）: {e}")
@@ -256,7 +264,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Rust 性能优化模块初始化失败（将使用 Python 降级）: {e}")
 
-    #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
+    # 🔥 Phase 3-05: 缓存系统初始化 (cache_manager, cache_warming)
+    try:
+        from app.core.cache_manager import init_cache_manager
+        from app.core.cache_warming import warmup_cache
+        await init_cache_manager()
+        logger.info("✅ 缓存管理器初始化完成")
+        # 异步预热缓存（不阻塞启动）
+        asyncio.create_task(warmup_cache())
+    except Exception as e:
+        logger.warning(f"⚠️ 缓存系统初始化失败（跳过）: {e}")
+
+    # 配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
         from app.core.config_bridge import bridge_config_to_env
         bridge_config_to_env()
@@ -596,6 +615,15 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
+        # ==================== 每日分析任务配置 ====================
+        logger.info("📊 配置每日分析任务...")
+
+        try:
+            from app.routers.daily_analysis.router import register_daily_analysis_jobs
+            register_daily_analysis_jobs(scheduler, settings)
+        except Exception as e:
+            logger.warning(f"⚠️ 每日分析任务注册失败: {e}")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -657,8 +685,8 @@ app.add_middleware(
 # 操作日志中间件
 app.add_middleware(OperationLogMiddleware)
 
-# P2-3: 性能监控中间件
-app.add_middleware(PerformanceMonitorMiddleware)
+# Phase 3-07: 增强型性能监控中间件 (P95/P99 百分位数)
+app.add_middleware(PerformanceMonitorMiddlewareV2)
 
 
 # 请求日志中间件
@@ -759,9 +787,15 @@ app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
 app.include_router(financial_data.router, tags=["financial-data"])
 app.include_router(news_data.router, tags=["news-data"])
 app.include_router(market_news_router.router)
-# app.include_router(market_ranking_router.router)  # 临时注释，排查问题
+app.include_router(market_ranking_router.router)
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
+
+# 每日分析模块（集成自 daily_stock_analysis）
+app.include_router(daily_analysis_router)
+
+# Phase 3-07: 性能监控面板路由
+app.include_router(monitoring_router.router)
 
 
 @app.get("/")

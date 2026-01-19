@@ -1,0 +1,284 @@
+# TACN v2.0 Production Docker Compose
+#
+# Usage:
+#   docker-compose -f docker-compose.production.yml up -d
+#
+# Environment:
+#   Copy .env.production.example to .env.production and customize
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # APPLICATION SERVICES
+  # ============================================================================
+
+  backend:
+    image: tacn/backend:v2.0.0
+    container_name: tacn-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - APP_ENV=production
+      - MONGODB_HOST=mongodb
+      - REDIS_HOST=redis
+      - CACHE_ENABLED=true
+      - PERFORMANCE_MONITORING_ENABLED=true
+      - TS_SERVICES_ENABLED=true
+      - RUST_MODULES_ENABLED=true
+    env_file:
+      - .env.production
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ${VOLUME_DATA:-/var/lib/tacn/data}:/app/data
+      - ${VOLUME_LOGS:-/var/log/tacn}:/app/logs
+      - ${VOLUME_UPLOADS:-/var/lib/tacn/uploads}:/app/uploads
+    networks:
+      - tacn-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  frontend:
+    image: tacn/frontend:v2.0.0
+    container_name: tacn-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    environment:
+      - VUE_APP_API_BASE_URL=http://backend:8000
+      - VUE_APP_WS_BASE_URL=ws://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - tacn-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # ============================================================================
+  # DATABASE SERVICES
+  # ============================================================================
+
+  mongodb:
+    image: mongo:7.0
+    container_name: tacn-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGODB_USERNAME:-tacn_user}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD:-your_mongodb_password}
+      - MONGO_INITDB_DATABASE=${MONGODB_DATABASE:-tacn_production}
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+      - ./scripts/mongodb-init.js:/docker-entrypoint-initdb.d/init.js:ro
+    networks:
+      - tacn-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    command:
+      - "--bind_ip_all"
+      - "--auth"
+      - "--wiredTigerCacheSizeGB=2"
+
+  redis:
+    image: redis:7-alpine
+    container_name: tacn-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-your_redis_password}
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis-data:/data
+    networks:
+      - tacn-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+
+  # ============================================================================
+  # REVERSE PROXY
+  # ============================================================================
+
+  nginx:
+    image: tacn/nginx:v2.0.0
+    container_name: tacn-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ${VOLUME_LOGS:-/var/log/tacn}:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - tacn-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # ============================================================================
+  # MONITORING (Optional)
+  # ============================================================================
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: tacn-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    networks:
+      - tacn-network
+    profiles:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: tacn-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    networks:
+      - tacn-network
+    profiles:
+      - monitoring
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================================
+  # BACKUP SERVICE (Optional)
+  # ============================================================================
+
+  backup:
+    image: tacn/backup:v2.0.0
+    container_name: tacn-backup
+    restart: unless-stopped
+    environment:
+      - S3_BUCKET=${BACKUP_S3_BUCKET}
+      - S3_REGION=${BACKUP_S3_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-0 2 * * *}
+    volumes:
+      - mongodb-data:/data/mongodb:ro
+      - redis-data:/data/redis:ro
+      - ${VOLUME_DATA:-/var/lib/tacn/data}:/data/app:ro
+    networks:
+      - tacn-network
+    profiles:
+      - backup
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+
+networks:
+  tacn-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+
+volumes:
+  mongodb-data:
+    driver: local
+  mongodb-config:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
