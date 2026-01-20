@@ -9,6 +9,7 @@ import type {
   AnalysisResult,
   TrendAnalysisResult,
   TaskStatus,
+  TaskStatusResponse,
   ResearchDepth,
 } from '../types/analysis.js';
 
@@ -18,6 +19,7 @@ export type {
   AnalysisResult,
   TrendAnalysisResult,
   TaskStatus,
+  TaskStatusResponse,
   ResearchDepth,
 };
 
@@ -71,27 +73,7 @@ export interface BatchAnalysisOptions extends AnalysisOptions {
   callbackUrl?: string;
 }
 
-/**
- * Task status response
- */
-export interface TaskStatusResponse {
-  /** Task ID */
-  taskId: string;
-  /** Task status */
-  status: TaskStatus;
-  /** Progress percentage (0-100) */
-  progress?: number;
-  /** Current step */
-  currentStep?: string;
-  /** Result if completed */
-  result?: AnalysisResult;
-  /** Error if failed */
-  error?: string;
-  /** Created timestamp */
-  createdAt: number;
-  /** Updated timestamp */
-  updatedAt: number;
-}
+// TaskStatusResponse is re-exported from types/analysis.ts
 
 /**
  * Batch task status response
