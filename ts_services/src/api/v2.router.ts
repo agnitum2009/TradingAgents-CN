@@ -7,10 +7,12 @@
 import { Logger } from '../utils/logger.js';
 import type { RouteDefinition } from '../routes/router.types.js';
 import { AnalysisController } from '../controllers/analysis.controller.js';
-import { ConfigController } from '../controllers/config.controller.js';
-import { WatchlistController } from '../controllers/watchlist.controller.js';
-import { NewsController } from '../controllers/news.controller.js';
+import { AuthController } from '../controllers/auth.controller.js';
 import { BatchQueueController } from '../controllers/batch-queue.controller.js';
+import { ConfigController } from '../controllers/config.controller.js';
+import { NewsController } from '../controllers/news.controller.js';
+import { StockDataController } from '../controllers/stock-data.controller.js';
+import { WatchlistController } from '../controllers/watchlist.controller.js';
 import type { BaseRouter } from '../routes/router.base.js';
 
 const logger = Logger.for('ApiV2Router');
@@ -46,6 +48,14 @@ export class ApiV2Router {
    */
   private registerControllers(): void {
     try {
+      // Auth controller
+      this.controllers.push({
+        name: 'Auth',
+        instance: new AuthController(),
+        basePath: '/api/v2/auth',
+        description: 'Authentication endpoints',
+      });
+
       // Analysis controller
       this.controllers.push({
         name: 'Analysis',
@@ -84,6 +94,14 @@ export class ApiV2Router {
         instance: new BatchQueueController(),
         basePath: '/api/v2/queue',
         description: 'Batch queue endpoints',
+      });
+
+      // Stock Data controller
+      this.controllers.push({
+        name: 'StockData',
+        instance: new StockDataController(),
+        basePath: '/api/v2/stocks',
+        description: 'Stock data endpoints (TypeScript native)',
       });
 
       logger.info(`Registered ${this.controllers.length} controllers for API v2`);

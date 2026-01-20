@@ -16,7 +16,11 @@
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "clean": "rimraf build",
-    "prebuild": "npm run clean"
+    "prebuild": "npm run clean",
+    "start": "node build/server.js",
+    "start:dev": "tsx watch src/server.ts",
+    "start:prod": "node build/server.js",
+    "build:server": "tsc --project tsconfig.build.json"
   },
   "keywords": [
     "trading",
@@ -27,8 +31,17 @@
   "author": "TradingAgents-CN Team",
   "license": "PROPRIETARY",
   "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/swagger": "^8.14.0",
+    "@fastify/swagger-ui": "^2.1.0",
+    "axios": "^1.7.0",
     "date-fns": "^3.0.0",
+    "dotenv": "^16.4.5",
     "eventemitter3": "^5.0.1",
+    "fastify": "^4.26.2",
+    "iconv-lite": "^0.6.3",
+    "ioredis": "^5.4.2",
+    "jsonwebtoken": "^9.0.3",
     "mongodb": "^6.21.0",
     "redis": "^5.10.0",
     "reflect-metadata": "^0.2.2",
@@ -38,7 +51,9 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
+    "@types/iconv-lite": "^0.0.1",
     "@types/jest": "^29.5.11",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.10.0",
     "@types/uuid": "^9.0.7",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
@@ -50,6 +65,7 @@
     "prettier": "^3.1.1",
     "rimraf": "^5.0.5",
     "ts-jest": "^29.1.1",
+    "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   },
   "engines": {

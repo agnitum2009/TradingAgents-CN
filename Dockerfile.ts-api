@@ -1,0 +1,45 @@
+# TypeScript API Dockerfile for TACN v2.0
+# 独立 TypeScript API 服务
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Copy package files and build config
+COPY ts_services/package*.json ts_services/tsconfig*.json ./ts_services/
+
+# Install all dependencies (including devDependencies for build)
+WORKDIR /app/ts_services
+RUN npm ci
+
+# Copy TypeScript source (directly into /app/ts_services)
+COPY ts_services/src ./src
+
+# Build TypeScript (using the build config)
+RUN npm run build:server || true
+
+# Create production-only node_modules for smaller image
+RUN npm ci --only=production
+
+# Create a non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S tsapi -u 1001 && \
+    chown -R tsapi:nodejs /app
+
+# Switch to non-root user
+USER tsapi
+
+# Expose TypeScript API port
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3001/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+
+# Set environment
+ENV NODE_ENV=production \
+    TS_SERVICES_HOST=0.0.0.0 \
+    TS_SERVICES_PORT=3001
+
+# Start TypeScript API server
+CMD ["node", "build/server.js"]
