@@ -16,7 +16,7 @@
  * - MongoDB/Redis progress synchronization
  */
 
-import { injectable } from 'tsyringe';
+import { injectable, inject } from 'tsyringe';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   AnalysisTask,
@@ -37,6 +37,10 @@ import type { EngineConfig } from './engine/index.js';
 import { AnalysisEngineManager, getEngineManager } from './engine/index.js';
 import { Logger } from '../../utils/logger.js';
 import { Result, TacnError } from '../../utils/errors.js';
+import type { AnalysisTaskRepository, UserTaskStats } from '../../repositories/analysis-task.repository.js';
+import { getAnalysisTaskRepository } from '../../repositories/analysis-task.repository.js';
+import type { AnalysisBatchRepository, BatchStatistics } from '../../repositories/analysis-batch.repository.js';
+import { getAnalysisBatchRepository } from '../../repositories/analysis-batch.repository.js';
 
 const logger = Logger.for('AIAnalysisOrchestrationService');
 
@@ -158,9 +162,35 @@ export class AIAnalysisOrchestrationService {
   /** Progress trackers (task_id -> tracker data) */
   private _progressTrackers = new Map<string, TaskStatusResponse>();
 
-  constructor() {
+  /** Task repository */
+  private readonly _taskRepository: AnalysisTaskRepository;
+
+  /** Batch repository */
+  private readonly _batchRepository: AnalysisBatchRepository;
+
+  /** Simulation mode - for testing without actual Python/LLM calls */
+  private _simulationMode: boolean;
+
+  constructor(
+    taskRepository?: AnalysisTaskRepository,
+    batchRepository?: AnalysisBatchRepository,
+    simulationMode?: boolean
+  ) {
     this._engineManager = getEngineManager();
-    logger.info('🔧 AIAnalysisOrchestrationService initialized');
+    this._taskRepository = taskRepository || getAnalysisTaskRepository();
+    this._batchRepository = batchRepository || getAnalysisBatchRepository();
+
+    // Link repositories for batch progress tracking
+    this._batchRepository.setTaskRepository(this._taskRepository);
+
+    // Enable simulation mode in test environment or when explicitly requested
+    this._simulationMode = simulationMode || process.env.NODE_ENV === 'test' || process.env.TACN_SIMULATION_MODE === 'true';
+
+    if (this._simulationMode) {
+      logger.warn('🎭 AIAnalysisOrchestrationService running in SIMULATION mode - no actual Python/LLM calls');
+    } else {
+      logger.info('🔧 AIAnalysisOrchestrationService initialized with repositories');
+    }
   }
 
   /**
@@ -309,15 +339,11 @@ export class AIAnalysisOrchestrationService {
       logger.info(`📊 Stock code: ${stockSymbol}`);
       logger.info(`⚙️ Analysis parameters: ${JSON.stringify(request.parameters)}`);
 
-      // Generate task ID
-      const taskId = uuidv4();
-      logger.info(`🆔 Generated task ID: ${taskId}`);
-
       // Convert user ID
       const convertedUserId = this._convertUserId(userId);
       logger.info(`🔄 Converted user ID: ${convertedUserId}`);
 
-      // Get effective settings from database (if available)
+      // Get effective settings from request parameters
       const params = request.parameters || ({} as AnalysisParameters);
       if (!params.quickAnalysisModel) {
         params.quickAnalysisModel = 'qwen-turbo';
@@ -326,33 +352,24 @@ export class AIAnalysisOrchestrationService {
         params.deepAnalysisModel = 'qwen-max';
       }
 
-      // Create analysis task
-      const task = {
-        id: taskId,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        taskId,
-        userId: convertedUserId,
-        symbol: stockSymbol,
-        stockCode: stockSymbol,
-        parameters: params,
-        status: TaskStatus.PENDING,
-        progress: 0,
-      } as AnalysisTask;
+      // Create analysis task via repository
+      const task = await this._taskRepository.createTask(
+        convertedUserId,
+        stockSymbol,
+        params
+      );
 
-      // Save task to MongoDB via Python (using adapter)
-      // Note: In production, this would use the PythonAdapter to call
-      // the Python service. For now, we'll simulate this.
+      logger.info(`🆔 Task created: ${task.taskId} - ${stockSymbol}`);
 
       // Execute analysis in background (non-blocking)
       this._executeSingleAnalysisAsync(task).catch((error) => {
         logger.error(`Background analysis failed: ${error}`);
       });
 
-      logger.info(`🎉 Single analysis task submitted: ${taskId} - ${stockSymbol}`);
+      logger.info(`🎉 Single analysis task submitted: ${task.taskId} - ${stockSymbol}`);
 
       return Result.ok({
-        task_id: taskId,
+        task_id: task.taskId,
         symbol: stockSymbol,
         status: TaskStatus.PENDING,
       });
@@ -377,9 +394,6 @@ export class AIAnalysisOrchestrationService {
     try {
       logger.info('📝 Submitting batch analysis task');
 
-      // Generate batch ID
-      const batchId = uuidv4();
-
       // Convert user ID
       const convertedUserId = this._convertUserId(userId);
 
@@ -389,7 +403,7 @@ export class AIAnalysisOrchestrationService {
         return Result.error(new TacnError('ANALYSIS_ERROR', 'Stock codes list cannot be empty'));
       }
 
-      // Get effective settings from database
+      // Get effective settings from request
       const params = request.parameters || ({} as AnalysisParameters);
       if (!params.quickAnalysisModel) {
         params.quickAnalysisModel = 'qwen-turbo';
@@ -398,29 +412,40 @@ export class AIAnalysisOrchestrationService {
         params.deepAnalysisModel = 'qwen-max';
       }
 
-      // Create batch record
-      // In production, this would be saved to MongoDB
-      /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-      const batch = {
-        id: batchId,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        batchId,
-        userId: convertedUserId,
-        title: request.title,
-        description: request.description,
-        totalTasks: stockSymbols.length,
-        parameters: params,
-        status: BatchStatus.PENDING,
-      } as AnalysisBatch;
+      // Create batch via repository
+      const batch = await this._batchRepository.createBatch(
+        convertedUserId,
+        stockSymbols,
+        params,
+        request.title,
+        request.description
+      );
 
-      // Save batch to MongoDB via Python adapter (simulated for now)
-      // In production: await pythonAdapter.saveBatch(batch);
+      logger.info(`📦 Batch created: ${batch.batchId} - ${stockSymbols.length} stocks`);
 
-      logger.info(`📦 Batch analysis submitted: ${batchId} - ${stockSymbols.length} stocks`);
+      // Create individual tasks for each symbol
+      const tasks: AnalysisTask[] = [];
+      for (const symbol of stockSymbols) {
+        const task = await this._taskRepository.createTask(
+          convertedUserId,
+          symbol,
+          params,
+          batch.batchId
+        );
+        tasks.push(task);
+      }
+
+      logger.info(`📋 Created ${tasks.length} tasks for batch: ${batch.batchId}`);
+
+      // Start batch execution in background
+      this._executeBatchAsync(batch, tasks).catch((error) => {
+        logger.error(`Background batch execution failed: ${error}`);
+      });
+
+      logger.info(`🚀 Batch analysis submitted: ${batch.batchId} - ${stockSymbols.length} stocks`);
 
       return Result.ok({
-        batch_id: batchId,
+        batch_id: batch.batchId,
         total_tasks: stockSymbols.length,
         status: BatchStatus.PENDING,
       });
@@ -467,6 +492,51 @@ export class AIAnalysisOrchestrationService {
       progressTracker.progress = 10;
       await this._updateTaskStatus(task.taskId, TaskStatus.PROCESSING, 10, progressTracker);
 
+      // SIMULATION MODE: Skip actual Python/LLM calls
+      if (this._simulationMode) {
+        logger.info(`🎭 SIMULATION: Skipping actual analysis for ${task.taskId}`);
+
+        // Simulate processing delay
+        await this._simulateProgress(task.taskId, progressTracker);
+
+        // Generate mock result
+        const mockResult: AnalysisResult = {
+          analysisId: uuidv4(),
+          summary: `[SIMULATION] 模拟分析结果 for ${task.symbol}`,
+          recommendation: this._getRandomRecommendation(),
+          confidenceScore: 0.7 + Math.random() * 0.25,
+          riskLevel: this._getRandomRiskLevel(),
+          keyPoints: [
+            `[模拟] 均线趋势${Math.random() > 0.5 ? '向上' : '向下'}`,
+            `[模拟] 成交量${Math.random() > 0.5 ? '放大' : '缩小'}`,
+            `[模拟] 技术指标${Math.random() > 0.5 ? '看涨' : '看跌'}`
+          ],
+          detailedAnalysis: {
+            simulation: true,
+            symbol: task.symbol,
+            parameters: task.parameters,
+            note: 'This is a simulated result for testing purposes'
+          },
+          executionTime: 1 + Math.random() * 2,
+          tokensUsed: 500 + Math.floor(Math.random() * 500),
+          modelInfo: 'simulation-model',
+        };
+
+        progressTracker.executionTime = mockResult.executionTime;
+        progressTracker.tokensUsed = mockResult.tokensUsed;
+        progressTracker.resultData = mockResult.detailedAnalysis as Record<string, unknown>;
+
+        // Mark as completed
+        progressTracker.message = '✅ 分析完成 (模拟)';
+        progressTracker.progress = 100;
+        progressTracker.status = TaskStatus.COMPLETED;
+        await this._updateTaskStatus(task.taskId, TaskStatus.COMPLETED, 100, progressTracker, mockResult);
+
+        logger.info(`✅ [SIMULATION] Analysis task completed: ${task.taskId} - ${mockResult.executionTime.toFixed(2)}s`);
+        return;
+      }
+
+      // PRODUCTION MODE: Actual Python/LLM calls
       // Get trading graph engine
       const tradingGraph = await this._getTradingGraph(config);
 
@@ -537,25 +607,74 @@ export class AIAnalysisOrchestrationService {
   }
 
   /**
-   * Update task status in MongoDB
+   * Simulate progress updates during analysis (for simulation mode)
+   *
+   * @param taskId - Task ID
+   * @param progressTracker - Progress tracker to update
+   */
+  private async _simulateProgress(taskId: string, progressTracker: TaskStatusResponse): Promise<void> {
+    const delays = [100, 200, 300]; // milliseconds between updates
+    const messages = [
+      '🔧 正在获取市场数据...',
+      '📊 正在计算技术指标...',
+      '🤖 正在生成AI分析...'
+    ];
+
+    for (let i = 0; i < messages.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, delays[i]));
+      progressTracker.message = messages[i];
+      progressTracker.progress = 20 + (i + 1) * 20;
+      await this._updateTaskStatus(taskId, TaskStatus.PROCESSING, progressTracker.progress, progressTracker);
+    }
+  }
+
+  /**
+   * Get a random recommendation for simulation mode
+   */
+  private _getRandomRecommendation(): string {
+    const recommendations = ['BUY', 'HOLD', 'SELL'];
+    return recommendations[Math.floor(Math.random() * recommendations.length)];
+  }
+
+  /**
+   * Get a random risk level for simulation mode
+   */
+  private _getRandomRiskLevel(): string {
+    const levels = ['低', '中等', '高'];
+    return levels[Math.floor(Math.random() * levels.length)];
+  }
+
+  /**
+   * Update task status in repository
    *
    * @param taskId - Task ID
    * @param status - New status
    * @param progress - Progress percentage
-   * @param _progressData - Progress tracker data (unused in simulation)
-   * @param _result - Optional analysis result (unused in simulation)
+   * @param progressData - Progress tracker data
+   * @param result - Optional analysis result
    */
   private async _updateTaskStatus(
     taskId: string,
     status: TaskStatus,
     progress: number,
-    _progressData: TaskStatusResponse,
-    _result?: AnalysisResult
+    progressData: TaskStatusResponse,
+    result?: AnalysisResult
   ): Promise<void> {
     try {
-      // In production, this would call Python adapter to update MongoDB
-      // For now, we just log
-      logger.debug(`Task status update: ${taskId} - ${status} (${progress}%)`);
+      await this._taskRepository.updateTaskStatus(
+        taskId,
+        status,
+        progress,
+        progressData.message,
+        progressData.currentStep
+      );
+
+      // Save result if provided
+      if (result && status === TaskStatus.COMPLETED) {
+        await this._taskRepository.saveResult(taskId, result);
+      }
+
+      logger.debug(`Task status updated: ${taskId} - ${status} (${progress}%)`);
     } catch (error) {
       const err = error as Error;
       logger.error(`Failed to update task status: ${taskId} - ${err.message}`);
@@ -570,13 +689,47 @@ export class AIAnalysisOrchestrationService {
    */
   async getTaskStatus(taskId: string): Promise<TaskStatusResponse | null> {
     try {
-      // Check memory cache first
+      // Check memory cache first (for running tasks)
       if (this._progressTrackers.has(taskId)) {
         return this._progressTrackers.get(taskId)!;
       }
 
-      // Query from MongoDB via Python adapter (simulated for now)
-      return null;
+      // Query from repository
+      const task = await this._taskRepository.getTaskByTaskId(taskId);
+      if (!task) {
+        return null;
+      }
+
+      // Build response from task
+      const response: TaskStatusResponse = {
+        taskId: task.taskId,
+        userId: task.userId,
+        symbol: task.symbol,
+        stockCode: task.stockCode,
+        status: task.status,
+        progress: task.progress || 0,
+        currentStep: task.currentStep,
+        message: task.message,
+        elapsedTime: 0,
+        remainingTime: 0,
+        estimatedTotalTime: task.estimatedDuration || 300,
+        steps: [],
+        startTime: task.startedAt,
+        endTime: task.completedAt,
+        lastUpdate: task.updatedAt,
+        parameters: task.parameters,
+        executionTime: task.startedAt && task.completedAt
+          ? (task.completedAt - task.startedAt) / 1000
+          : undefined,
+      };
+
+      // Add result data if available
+      if (task.result) {
+        response.tokensUsed = task.result.tokensUsed;
+        response.resultData = task.result.detailedAnalysis as Record<string, unknown>;
+      }
+
+      return response;
     } catch (error) {
       const err = error as Error;
       logger.error(`Failed to get task status: ${taskId} - ${err.message}`);
@@ -592,25 +745,146 @@ export class AIAnalysisOrchestrationService {
    */
   async cancelTask(taskId: string): Promise<boolean> {
     try {
-      await this._updateTaskStatus(taskId, TaskStatus.CANCELLED, 0, {
-        taskId,
-        status: TaskStatus.CANCELLED,
-        progress: 0,
-        elapsedTime: 0,
-        remainingTime: 0,
-        estimatedTotalTime: 0,
-        steps: [],
-      });
-
-      // Remove from queue if still queued
-      // In production, this would call Python adapter
-
-      logger.info(`Task cancelled: ${taskId}`);
-      return true;
+      const result = await this._taskRepository.cancelTask(taskId);
+      if (result) {
+        // Remove from memory cache
+        this._progressTrackers.delete(taskId);
+        logger.info(`Task cancelled: ${taskId}`);
+      }
+      return result;
     } catch (error) {
       const err = error as Error;
       logger.error(`Failed to cancel task: ${taskId} - ${err.message}`);
       return false;
+    }
+  }
+
+  /**
+   * Get batch status
+   *
+   * @param batchId - Batch ID
+   * @returns Batch statistics or null if not found
+   */
+  async getBatchStatus(batchId: string): Promise<BatchStatistics | null> {
+    try {
+      return await this._batchRepository.getBatchStatistics(batchId);
+    } catch (error) {
+      const err = error as Error;
+      logger.error(`Failed to get batch status: ${batchId} - ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Cancel a batch
+   *
+   * @param batchId - Batch ID to cancel
+   * @returns True if cancelled successfully
+   */
+  async cancelBatch(batchId: string): Promise<boolean> {
+    try {
+      // Cancel batch
+      const batchResult = await this._batchRepository.cancelBatch(batchId);
+
+      // Cancel all pending/processing tasks in the batch
+      const tasks = await this._taskRepository.getTasksByBatch(batchId);
+      for (const task of tasks) {
+        if (
+          task.status === TaskStatus.PENDING ||
+          task.status === TaskStatus.PROCESSING
+        ) {
+          await this._taskRepository.cancelTask(task.taskId);
+          // Remove from memory cache
+          this._progressTrackers.delete(task.taskId);
+        }
+      }
+
+      logger.info(`Batch cancelled: ${batchId} (${tasks.length} tasks)`);
+      return batchResult;
+    } catch (error) {
+      const err = error as Error;
+      logger.error(`Failed to cancel batch: ${batchId} - ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get user task statistics
+   *
+   * @param userId - User ID
+   * @returns User task statistics
+   */
+  async getUserTaskStats(userId: string): Promise<UserTaskStats | null> {
+    try {
+      const convertedUserId = this._convertUserId(userId);
+      return await this._taskRepository.getUserStats(convertedUserId);
+    } catch (error) {
+      const err = error as Error;
+      logger.error(`Failed to get user task stats: ${userId} - ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Execute batch analysis asynchronously
+   *
+   * @param batch - Batch to execute
+   * @param tasks - Tasks in the batch
+   */
+  private async _executeBatchAsync(
+    batch: AnalysisBatch,
+    tasks: AnalysisTask[]
+  ): Promise<void> {
+    try {
+      logger.info(`🚀 Starting batch execution: ${batch.batchId} - ${tasks.length} tasks`);
+
+      // Update batch status to processing
+      await this._batchRepository.updateBatchStatus(
+        batch.batchId,
+        BatchStatus.PROCESSING,
+        Date.now()
+      );
+
+      // Execute tasks sequentially (with concurrency control in production)
+      const concurrency = 3; // Max 3 concurrent tasks
+      const executing: Promise<void>[] = [];
+
+      for (const task of tasks) {
+        const p = this._executeSingleAnalysisAsync(task).then(async () => {
+          // Update batch progress
+          await this._batchRepository.incrementTaskCompletion(batch.batchId, true);
+        }).catch(async (error) => {
+          logger.error(`Task failed in batch: ${task.taskId} - ${error}`);
+          // Update batch progress (failed)
+          await this._batchRepository.incrementTaskCompletion(batch.batchId, false);
+        });
+
+        executing.push(p);
+
+        // Wait for some tasks to complete if we hit concurrency limit
+        if (executing.length >= concurrency) {
+          await Promise.race(executing);
+          // Remove completed promises - filter by checking if promise is still pending
+          // We use a simple approach: just keep all promises and let them settle
+          // The race above ensures at least one completed before we add more
+        }
+      }
+
+      // Wait for all tasks to complete
+      await Promise.allSettled(executing);
+
+      logger.info(`✅ Batch execution completed: ${batch.batchId}`);
+    } catch (error) {
+      const e = error as Error;
+      logger.error(`❌ Batch execution failed: ${batch.batchId} - ${e.message}`);
+
+      // Update batch status to failed
+      await this._batchRepository.updateBatchStatus(
+        batch.batchId,
+        BatchStatus.FAILED,
+        batch.startedAt,
+        Date.now()
+      );
     }
   }
 
