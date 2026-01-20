@@ -2,11 +2,13 @@
  * Analysis Controller
  *
  * API v2 controller for AI analysis and trend analysis endpoints.
+ * Bridges to Python backend API via HTTP requests.
  */
 
 import { Logger } from '../utils/logger.js';
 import { BaseRouter, type RouterConfig } from '../routes/index.js';
 import { createSuccessResponse, handleRouteError } from '../middleware/index.js';
+import { getPythonApiClient, type PythonApiError } from '../integration/python-api-client.js';
 import type {
   // Request types
   SubmitSingleAnalysisRequest,
@@ -18,6 +20,7 @@ import type {
   AnalysisSummaryResponse,
   CancelTaskResponse,
 } from '../dtos/analysis.dto.js';
+import type { AnalysisTask, AnalysisBatch } from '../types/analysis.js';
 
 const logger = Logger.for('AnalysisController');
 
@@ -25,12 +28,14 @@ const logger = Logger.for('AnalysisController');
  * Analysis Controller
  *
  * Handles all AI analysis and trend analysis endpoints.
+ * Delegates actual analysis work to Python backend via HTTP.
  */
 export class AnalysisController extends BaseRouter {
   constructor() {
     const config: RouterConfig = {
       basePath: '/api/v2/analysis',
       description: 'AI analysis and trend analysis endpoints',
+      defaultAuthRequired: true,
     };
     super(config);
     this.registerRoutes();
@@ -44,52 +49,51 @@ export class AnalysisController extends BaseRouter {
     this.post<SubmitSingleAnalysisRequest, TaskStatusResponse>(
       '/ai/single',
       this.submitSingleAnalysis.bind(this),
-      { authRequired: true }
     );
 
     this.get<TaskStatusResponse>(
       '/ai/tasks/:id',
       this.getTaskStatus.bind(this),
-      { authRequired: true }
     );
 
     this.get<AnalysisSummaryResponse>(
       '/ai/tasks/:id/result',
       this.getTaskResult.bind(this),
-      { authRequired: true }
     );
 
     this.post<CancelTaskResponse>(
       '/ai/tasks/:id/cancel',
       this.cancelTask.bind(this),
-      { authRequired: true }
     );
 
     // Batch analysis routes
     this.post<SubmitBatchAnalysisRequest, BatchTaskStatusResponse>(
       '/ai/batch',
       this.submitBatchAnalysis.bind(this),
-      { authRequired: true }
     );
 
     this.get<BatchTaskStatusResponse>(
       '/ai/batch/:id',
       this.getBatchStatus.bind(this),
-      { authRequired: true }
     );
 
     // Trend analysis routes
     this.post<TrendAnalysisRequest, AnalysisSummaryResponse>(
       '/trend',
       this.analyzeTrend.bind(this),
-      { authRequired: true }
     );
 
     // History routes
     this.get<any>(
       '/history',
       this.getAnalysisHistory.bind(this),
-      { authRequired: true }
+    );
+
+    // Public route for health check
+    this.get<any>(
+      '/health',
+      this.healthCheck.bind(this),
+      { authRequired: false }
     );
   }
 
@@ -99,16 +103,48 @@ export class AnalysisController extends BaseRouter {
    */
   private async submitSingleAnalysis(input: any) {
     try {
-      const { stockCode } = input.body;
-      logger.info(`Submit single analysis for ${stockCode}`);
+      const { stockCode, symbol, parameters } = input.body;
+      const resolvedSymbol = stockCode || symbol || '';
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      if (!resolvedSymbol) {
+        return handleRouteError(new Error('Stock code is required'), input.context.requestId);
+      }
+
+      logger.info(`Submit single analysis for ${resolvedSymbol}`);
+
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      // Submit to Python API
+      const response = await client.submitSingleAnalysis(
+        {
+          symbol: resolvedSymbol,
+          parameters: parameters || {},
+        },
+        authToken
+      );
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to submit analysis');
+      }
+
+      // Map to TaskStatusResponse
       const result: TaskStatusResponse = {
-        taskId: `task_${Date.now()}`,
-        status: 'pending' as any,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        taskId: response.data.task_id,
+        userId: input.context.user?.userId,
+        symbol: response.data.symbol || resolvedSymbol,
+        stockCode: resolvedSymbol,
+        status: response.data.status as any,
+        progress: 0,
+        currentStep: 'Task created',
+        elapsedTime: 0,
+        remainingTime: 0,
+        estimatedTotalTime: 0,
+        startTime: response.data.created_at,
+        lastUpdate: response.data.created_at,
       };
+
+      logger.info(`Analysis task created: ${result.taskId} for ${resolvedSymbol}`);
 
       return createSuccessResponse(result);
     } catch (error) {
@@ -125,14 +161,34 @@ export class AnalysisController extends BaseRouter {
       const taskId = input.params.id;
       logger.info(`Get task status: ${taskId}`);
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.getTaskStatus(taskId, authToken);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to get task status');
+      }
+
+      if (!response.data) {
+        return handleRouteError(new Error('Task not found'), input.context.requestId);
+      }
+
+      // Map to TaskStatusResponse
       const result: TaskStatusResponse = {
-        taskId,
-        status: 'pending' as any,
-        progress: 50,
-        currentStep: 'analyzing',
-        createdAt: Date.now() - 60000,
-        updatedAt: Date.now(),
+        taskId: response.data.task_id || taskId,
+        userId: input.context.user?.userId,
+        symbol: response.data.symbol,
+        status: response.data.status as any,
+        progress: response.data.progress || 0,
+        currentStep: response.data.current_step,
+        message: response.data.error,
+        elapsedTime: response.data.elapsed_time || 0,
+        remainingTime: response.data.estimated_total_time ?
+          Math.max(0, response.data.estimated_total_time - (response.data.elapsed_time || 0)) : 0,
+        estimatedTotalTime: response.data.estimated_total_time || 0,
+        startTime: undefined,
+        lastUpdate: Date.now(),
       };
 
       return createSuccessResponse(result);
@@ -150,19 +206,37 @@ export class AnalysisController extends BaseRouter {
       const taskId = input.params.id;
       logger.info(`Get task result: ${taskId}`);
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
-      const result: AnalysisSummaryResponse = {
-        stockCode: '600519.A',
-        stockName: '贵州茅台',
-        rating: 4,
-        signal: 'buy',
-        confidence: 85,
-        trend: 'up',
-        findings: ['Strong uptrend', 'High volume', 'Positive sentiment'],
-        timestamp: Date.now(),
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.getTaskResult(taskId, authToken);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to get task result');
+      }
+
+      if (!response.data) {
+        return handleRouteError(new Error('Task result not found'), input.context.requestId);
+      }
+
+      const data = response.data;
+      const result = data.result as any;
+
+      // Map AnalysisResult to AnalysisSummaryResponse
+      const summary: AnalysisSummaryResponse = {
+        stockCode: data.symbol || 'UNKNOWN',
+        stockName: data.symbol || 'Unknown Stock',
+        rating: this.calculateRating(result),
+        signal: this.calculateSignal(result),
+        confidence: result?.confidence_score ? Math.round(result.confidence_score * 100) : 70,
+        trend: this.calculateTrend(result),
+        findings: result?.key_points || [],
+        timestamp: data.completed_at || Date.now(),
       };
 
-      return createSuccessResponse(result);
+      logger.info(`Task result retrieved: ${taskId}`);
+
+      return createSuccessResponse(summary);
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -177,11 +251,15 @@ export class AnalysisController extends BaseRouter {
       const taskId = input.params.id;
       logger.info(`Cancel task: ${taskId}`);
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.cancelTask(taskId, authToken);
+
       const result: CancelTaskResponse = {
         taskId,
-        cancelled: true,
-        message: 'Task cancelled successfully',
+        cancelled: response.success && response.data?.cancelled,
+        message: response.message,
       };
 
       return createSuccessResponse(result);
@@ -196,20 +274,44 @@ export class AnalysisController extends BaseRouter {
    */
   private async submitBatchAnalysis(input: any) {
     try {
-      const { stockCodes } = input.body;
-      logger.info(`Submit batch analysis for ${stockCodes.length} stocks`);
+      const { stockCodes, symbols, parameters, title, description } = input.body;
+      const resolvedSymbols = stockCodes || symbols || [];
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      if (!resolvedSymbols || resolvedSymbols.length === 0) {
+        return handleRouteError(new Error('Stock codes are required'), input.context.requestId);
+      }
+
+      logger.info(`Submit batch analysis for ${resolvedSymbols.length} stocks`);
+
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.submitBatchAnalysis(
+        {
+          symbols: resolvedSymbols,
+          parameters: parameters || {},
+          title,
+          description,
+        },
+        authToken
+      );
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to submit batch analysis');
+      }
+
       const result: BatchTaskStatusResponse = {
-        batchId: `batch_${Date.now()}`,
-        status: 'pending' as any,
-        total: stockCodes.length,
+        batchId: response.data.batch_id,
+        status: response.data.status as any,
+        total: response.data.total_tasks,
         completed: 0,
         failed: 0,
         tasks: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: response.data.created_at,
+        updatedAt: response.data.created_at,
       };
+
+      logger.info(`Batch analysis created: ${result.batchId} for ${resolvedSymbols.length} stocks`);
 
       return createSuccessResponse(result);
     } catch (error) {
@@ -226,15 +328,36 @@ export class AnalysisController extends BaseRouter {
       const batchId = input.params.id;
       logger.info(`Get batch status: ${batchId}`);
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.getBatchStatus(batchId, authToken);
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to get batch status');
+      }
+
+      if (!response.data) {
+        return handleRouteError(new Error('Batch not found'), input.context.requestId);
+      }
+
+      const data = response.data;
+
       const result: BatchTaskStatusResponse = {
-        batchId,
-        status: 'in_progress' as any,
-        total: 10,
-        completed: 5,
-        failed: 0,
-        tasks: [],
-        createdAt: Date.now() - 300000,
+        batchId: data.batch_id,
+        status: data.status as any,
+        total: data.total_tasks,
+        completed: data.completed_tasks,
+        failed: data.failed_tasks || 0,
+        tasks: (data.tasks || []).map(t => ({
+          taskId: t.task_id,
+          symbol: t.symbol,
+          status: t.status,
+          progress: t.progress,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        })),
+        createdAt: Date.now(),
         updatedAt: Date.now(),
       };
 
@@ -250,18 +373,43 @@ export class AnalysisController extends BaseRouter {
    */
   private async analyzeTrend(input: any) {
     try {
-      const { stockCode } = input.body;
-      logger.info(`Analyze trend for ${stockCode}`);
+      const { stockCode, symbol, parameters } = input.body;
+      const resolvedSymbol = stockCode || symbol || '';
 
-      // TODO: Integrate with TrendAnalysisService
+      if (!resolvedSymbol) {
+        return handleRouteError(new Error('Stock code is required'), input.context.requestId);
+      }
+
+      logger.info(`Analyze trend for ${resolvedSymbol}`);
+
+      // For trend analysis, submit as single analysis with trend type
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const response = await client.submitSingleAnalysis(
+        {
+          symbol: resolvedSymbol,
+          parameters: {
+            ...parameters,
+            analysis_type: 'trend',
+          },
+        },
+        authToken
+      );
+
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to submit trend analysis');
+      }
+
+      // Return placeholder response with task info
       const result: AnalysisSummaryResponse = {
-        stockCode,
-        stockName: '贵州茅台',
+        stockCode: resolvedSymbol,
+        stockName: resolvedSymbol,
         rating: 3,
         signal: 'hold',
         confidence: 70,
         trend: 'sideways',
-        findings: ['Consolidation phase', 'Waiting for breakout'],
+        findings: ['Trend analysis submitted', `Task ID: ${response.data.task_id}`],
         timestamp: Date.now(),
       };
 
@@ -277,19 +425,143 @@ export class AnalysisController extends BaseRouter {
    */
   private async getAnalysisHistory(input: any) {
     try {
-      logger.info('Get analysis history');
+      const userId = input.context.user?.userId;
 
-      // TODO: Integrate with AIAnalysisOrchestrationService
+      if (!userId) {
+        return handleRouteError(new Error('User not authenticated'), input.context.requestId);
+      }
+
+      logger.info(`Get analysis history for user: ${userId}`);
+
+      const client = getPythonApiClient();
+      const authToken = this.getAuthToken(input);
+
+      const page = parseInt(input.query.page || '1');
+      const pageSize = parseInt(input.query.pageSize || '20');
+
+      const response = await client.getAnalysisHistory(
+        {
+          user_id: userId,
+          symbol: input.query.symbol,
+          status: input.query.status,
+          limit: pageSize,
+          skip: (page - 1) * pageSize,
+        },
+        authToken
+      );
+
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to get analysis history');
+      }
+
+      const data = response.data;
+
       const result = {
-        items: [],
-        total: 0,
-        page: 1,
-        pageSize: 20,
+        items: (data.items || []).map(t => ({
+          taskId: t.task_id,
+          symbol: t.symbol,
+          stockCode: t.symbol,
+          status: t.status,
+          progress: 0,
+          currentStep: undefined,
+          createdAt: t.created_at,
+          updatedAt: t.created_at,
+          completedAt: t.completed_at,
+        })),
+        total: data.total || 0,
+        page,
+        pageSize,
       };
 
       return createSuccessResponse(result);
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
+  }
+
+  /**
+   * Health check endpoint
+   * GET /api/v2/analysis/health
+   */
+  private async healthCheck(input: any) {
+    try {
+      const client = getPythonApiClient();
+
+      // Check Python API health
+      const health = await client.healthCheck();
+
+      return createSuccessResponse({
+        status: 'healthy',
+        pythonBridge: true,
+        pythonApi: health.status,
+        timestamp: Date.now(),
+      });
+    } catch (error) {
+      return createSuccessResponse({
+        status: 'degraded',
+        pythonBridge: true,
+        pythonApi: 'unreachable',
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  /**
+   * Get auth token from request context
+   */
+  private getAuthToken(input: any): string | undefined {
+    // Try to get from Authorization header
+    const authHeader = input.headers?.authorization || input.headers?.Authorization;
+    if (authHeader && typeof authHeader === 'string') {
+      return authHeader.replace(/^Bearer\s+/i, '');
+    }
+
+    // Try to get from context (set by auth middleware)
+    return input.context?.token;
+  }
+
+  /**
+   * Calculate rating from analysis result
+   */
+  private calculateRating(result: any): number {
+    if (!result) return 3;
+    if (result.confidence_score >= 0.8) return 5;
+    if (result.confidence_score >= 0.6) return 4;
+    if (result.confidence_score >= 0.4) return 3;
+    if (result.confidence_score >= 0.2) return 2;
+    return 1;
+  }
+
+  /**
+   * Calculate signal from decision
+   */
+  private calculateSignal(result: any): 'buy' | 'sell' | 'hold' {
+    if (!result?.decision) return 'hold';
+
+    const action = (typeof result.decision === 'string')
+      ? result.decision.toLowerCase()
+      : (result.decision?.action?.toLowerCase() || '');
+
+    if (action === 'buy') return 'buy';
+    if (action === 'sell') return 'sell';
+    return 'hold';
+  }
+
+  /**
+   * Calculate trend from analysis
+   */
+  private calculateTrend(result: any): 'up' | 'down' | 'sideways' {
+    if (!result) return 'sideways';
+
+    const points = result.key_points || [];
+    const text = Array.isArray(points) ? points.join(' ').toLowerCase() : '';
+
+    if (text.includes('uptrend') || text.includes('上涨') || text.includes('bullish')) {
+      return 'up';
+    }
+    if (text.includes('downtrend') || text.includes('下跌') || text.includes('bearish')) {
+      return 'down';
+    }
+    return 'sideways';
   }
 }
