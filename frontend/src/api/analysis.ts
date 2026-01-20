@@ -1,9 +1,10 @@
 
 /**
- * 股票分析API
+ * 股票分析API (v2 Only)
  */
 
 import { request, type ApiResponse } from './request'
+import { analysisApi as analysisApiV2 } from '@/utils/api'
 
 // 分析相关类型定义
 export interface AnalysisRequest {
@@ -118,37 +119,88 @@ export interface AnalysisHistory {
 // 股票分析API
 export const analysisApi = {
   // 开始分析
-  startAnalysis(analysisRequest: AnalysisRequest): Promise<{ analysis_id: string; message: string }> {
-    return request.post('/api/analysis/single', analysisRequest)
+  async startAnalysis(analysisRequest: AnalysisRequest): Promise<{ analysis_id: string; message: string }> {
+    const response = await analysisApiV2.analyze(analysisRequest)
+    return { analysis_id: response.data.data.analysisId, message: 'Analysis started' }
   },
 
   // 开始单股分析（使用后端期望的格式）
-  startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
-    return request.post('/api/analysis/single', analysisRequest)
+  async startSingleAnalysis(analysisRequest: SingleAnalysisRequest): Promise<ApiResponse<any>> {
+    const response = await analysisApiV2.analyze(analysisRequest)
+    return response.data
   },
 
   // 获取任务状态
-  getTaskStatus(taskId: string): Promise<ApiResponse<any>> {
-    return request.get(`/api/analysis/tasks/${taskId}/status`)
+  async getTaskStatus(taskId: string): Promise<ApiResponse<any>> {
+    const response = await analysisApiV2.getStatus(taskId)
+    return response.data
   },
 
   // 获取分析进度
-  getProgress(analysisId: string): Promise<AnalysisProgress> {
-    return request.get(`/api/analysis/${analysisId}/progress`)
+  async getProgress(analysisId: string): Promise<AnalysisProgress> {
+    const response = await analysisApiV2.getStatus(analysisId)
+    // Map v2 response to AnalysisProgress format
+    return {
+      analysis_id: analysisId,
+      status: response.data.data.status,
+      progress: response.data.data.progress || 0,
+      current_step: response.data.data.currentStep || '',
+      step_detail: response.data.data.stepDetail || '',
+      steps: response.data.data.steps || [],
+      started_at: response.data.data.startedAt || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      estimated_completion: response.data.data.estimatedCompletion
+    }
   },
 
   // 获取分析结果
-  getResult(analysisId: string): Promise<AnalysisResult> {
-    return request.get(`/api/analysis/${analysisId}/result`)
+  async getResult(analysisId: string): Promise<AnalysisResult> {
+    const response = await analysisApiV2.getById(analysisId)
+    // Map v2 response to AnalysisResult format
+    const data = response.data.data
+    return {
+      analysis_id: analysisId,
+      symbol: data.symbol,
+      stock_symbol: data.symbol,
+      stock_code: data.code,
+      stock_name: data.name,
+      market_type: data.marketType,
+      analysis_date: data.analysisDate,
+      analysis_type: data.analysisType,
+      current_price: data.currentPrice,
+      price_change: data.priceChange,
+      price_change_percent: data.priceChangePercent,
+      volume: data.volume,
+      market_cap: data.marketCap,
+      summary: data.summary,
+      technical_analysis: data.technicalAnalysis,
+      fundamental_analysis: data.fundamentalAnalysis,
+      sentiment_analysis: data.sentimentAnalysis,
+      news_analysis: data.newsAnalysis,
+      recommendation: data.recommendation,
+      risk_assessment: data.riskAssessment,
+      technical_score: data.technicalScore,
+      fundamental_score: data.fundamentalScore,
+      sentiment_score: data.sentimentScore,
+      overall_score: data.overallScore,
+      data_sources: data.dataSources,
+      llm_provider: data.llmProvider,
+      llm_model: data.llmModel,
+      analysis_duration: data.analysisDuration,
+      token_usage: data.tokenUsage,
+      created_at: data.createdAt,
+      updated_at: data.updatedAt
+    }
   },
 
   // 停止分析
-  stopAnalysis(analysisId: string): Promise<{ message: string }> {
-    return request.post(`/api/analysis/${analysisId}/stop`, {})
+  async stopAnalysis(analysisId: string): Promise<{ message: string }> {
+    await analysisApiV2.cancel(analysisId)
+    return { message: 'Analysis stopped' }
   },
 
   // 获取分析历史（用户维度）
-  getHistory(params?: {
+  async getHistory(params?: {
     page?: number
     page_size?: number
     market_type?: string
@@ -158,7 +210,8 @@ export const analysisApi = {
     end_date?: string
     status?: string
   }): Promise<any> {
-    return request.get('/api/analysis/user/history', { params })
+    const response = await analysisApiV2.getHistory(params)
+    return response.data
   },
 
   // 删除分析结果

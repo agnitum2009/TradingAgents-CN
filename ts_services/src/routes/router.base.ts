@@ -23,6 +23,7 @@ import type {
   RouteRegistrationOptions,
   RouteRegistrationResult,
   RequestInput,
+  Response,
   RouteMiddleware,
   RequestContext,
 } from './router.types.js';
@@ -173,7 +174,7 @@ export abstract class BaseRouter {
     input: RequestInput<TInput>,
     handler: RouteHandler<TInput, TOutput>,
     options?: RouteRegistrationOptions
-  ): Promise<ReturnType<typeof createSuccessResponse> | ReturnType<typeof createErrorResponse>> {
+  ): Promise<Response<TOutput>> {
     try {
       // Create middleware chain
       const middlewareChain = this.createMiddlewareChain(options);
@@ -184,9 +185,9 @@ export abstract class BaseRouter {
         return await handler(input);
       });
 
-      return result as any;
+      return result as Response<TOutput>;
     } catch (error) {
-      return handleRouteError(error, input.context.requestId);
+      return handleRouteError(error, input.context.requestId) as Response<TOutput>;
     }
   }
 
@@ -207,7 +208,8 @@ export abstract class BaseRouter {
       const dispatch = async (): Promise<unknown> => {
         if (index < allMiddleware.length) {
           const mw = allMiddleware[index++];
-          return await mw(input.context, dispatch);
+          // Type assertion: middleware returns unknown but we treat it as compatible
+          return await mw(input.context, dispatch as any);
         }
         return await next();
       };

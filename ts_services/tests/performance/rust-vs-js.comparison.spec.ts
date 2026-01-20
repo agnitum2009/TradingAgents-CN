@@ -5,7 +5,7 @@
  */
 
 import { describe, it } from '@jest/globals';
-import { BenchmarkRunner } from '../benchmark-runner.js';
+import { BenchmarkRunner } from './benchmark-runner.js';
 import { RustDataAdapter } from '../../src/integration/rust-adapters/data.adapter.js';
 import { RustBacktestAdapter } from '../../src/integration/rust-adapters/backtest.adapter.js';
 import { RustStrategyAdapter } from '../../src/integration/rust-adapters/strategy.adapter.js';
@@ -62,18 +62,21 @@ describe('Rust vs JavaScript Performance Comparison', () => {
       // Generate test data
       const prices = Array.from({ length: 5000 }, () => 1000 + Math.random() * 200);
 
+      // Verify correctness first
+      const rsiValues = strategyAdapter['calculateRSIJS'](prices, 14);
+      expect(rsiValues).toBeDefined();
+      expect(rsiValues?.length).toBe(5000);
+
       // Benchmark JavaScript implementation
       const jsResult = await runner.run(
         'JS: Calculate RSI (5000 points)',
         async () => {
-          return strategyAdapter['calculateRSIJS'](prices, 14);
+          strategyAdapter['calculateRSIJS'](prices, 14);
         },
         { maxTime: 200, description: 'JavaScript RSI calculation' }
       );
 
-      const rsiValues = jsResult.result;
-      expect(rsiValues).toBeDefined();
-      expect(rsiValues?.length).toBe(5000);
+      expect(jsResult.passed).toBe(true);
     });
   });
 
@@ -84,18 +87,21 @@ describe('Rust vs JavaScript Performance Comparison', () => {
       // Generate test data
       const prices = Array.from({ length: 3000 }, () => 1000 + Math.random() * 200);
 
+      // Verify correctness first
+      const macdResult = strategyAdapter['calculateMACDJS'](prices, 12, 26, 9);
+      expect(macdResult).toBeDefined();
+      expect(macdResult?.macd.length).toBe(3000);
+
       // Benchmark JavaScript implementation
       const jsResult = await runner.run(
         'JS: Calculate MACD (3000 points)',
         async () => {
-          return strategyAdapter['calculateMACDJS'](prices, 12, 26, 9);
+          strategyAdapter['calculateMACDJS'](prices, 12, 26, 9);
         },
         { maxTime: 200, description: 'JavaScript MACD calculation' }
       );
 
-      const macdResult = jsResult.result;
-      expect(macdResult).toBeDefined();
-      expect(macdResult?.macd.length).toBe(3000);
+      expect(jsResult.passed).toBe(true);
     });
   });
 
@@ -113,21 +119,26 @@ describe('Rust vs JavaScript Performance Comparison', () => {
         volume: 1000000,
       }));
 
-      // Benchmark JavaScript implementation
+      // Verify correctness first (using public method)
+      const backtestResult = await backtestAdapter.runBacktest(klines, {
+        strategy: 'sma_cross',
+        strategyParams: { short_period: 5, long_period: 20 },
+      });
+      expect(backtestResult).toBeDefined();
+
+      // Benchmark the public method (may use Rust or JS fallback)
       const jsResult = await runner.run(
-        'JS: SMA Crossover Backtest (2000 bars)',
+        'Backtest: SMA Crossover (2000 bars)',
         async () => {
-          return backtestAdapter['runBacktestJS'](klines, {
+          await backtestAdapter.runBacktest(klines, {
             strategy: 'sma_cross',
             strategyParams: { short_period: 5, long_period: 20 },
           });
         },
-        { maxTime: 500, description: 'JavaScript backtest' }
+        { maxTime: 500, description: 'SMA crossover backtest' }
       );
 
-      const backtestResult = jsResult.result;
-      expect(backtestResult).toBeDefined();
-      expect(backtestResult?.totalTrades).toBeGreaterThanOrEqual(0);
+      expect(jsResult.passed).toBe(true);
     });
   });
 

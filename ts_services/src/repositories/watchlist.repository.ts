@@ -655,6 +655,96 @@ export class WatchlistRepository extends MemoryRepository<FavoriteStock> {
   }
 
   // ========================================================================
+  // Additional Operations
+  // ========================================================================
+
+  /**
+   * Add multiple favorites at once
+   *
+   * @param userId - User ID
+   * @param stocks - Array of stocks to add
+   * @returns Array of added favorite stocks
+   */
+  async addMultipleFavorites(
+    userId: string,
+    stocks: Array<{
+      stockCode: string;
+      stockName?: string;
+      market: FavoriteMarket;
+      tags?: string[];
+      notes?: string;
+    }>,
+  ): Promise<FavoriteStock[]> {
+    const results: FavoriteStock[] = [];
+
+    for (const stock of stocks) {
+      try {
+        const favorite = await this.addFavorite(userId, {
+          stockCode: stock.stockCode,
+          stockName: stock.stockName || stock.stockCode,
+          market: stock.market,
+          tags: stock.tags || [],
+          notes: stock.notes || '',
+        });
+        results.push(favorite);
+      } catch (error) {
+        logger.warn(`Failed to add favorite ${stock.stockCode}:`, error);
+      }
+    }
+
+    logger.info(`Added ${results.length}/${stocks.length} favorites for user: ${userId}`);
+    return results;
+  }
+
+  /**
+   * Set price alerts for a favorite stock
+   *
+   * @param userId - User ID
+   * @param stockCode - Stock code
+   * @param highPrice - High price alert threshold (optional)
+   * @param lowPrice - Low price alert threshold (optional)
+   * @returns Updated favorite or null if not found
+   */
+  async setPriceAlert(
+    userId: string,
+    stockCode: string,
+    highPrice?: number,
+    lowPrice?: number,
+  ): Promise<FavoriteStock | null> {
+    return this.updateFavorite(userId, stockCode, {
+      alertPriceHigh: highPrice,
+      alertPriceLow: lowPrice,
+    });
+  }
+
+  /**
+   * Get tag statistics for user
+   *
+   * @param userId - User ID
+   * @returns Tag statistics array
+   */
+  async getTagStats(userId: string): Promise<TagStats[]> {
+    const favorites = await this.getUserFavorites(userId);
+    const tagCounts = new Map<string, number>();
+
+    // Count tags
+    for (const favorite of favorites) {
+      for (const tag of favorite.tags) {
+        tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
+      }
+    }
+
+    // Build tag stats
+    return Array.from(tagCounts.entries())
+      .map(([tag, count]) => ({
+        tag,
+        count,
+        latestAdded: undefined,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  // ========================================================================
   // Cleanup
   // ========================================================================
 

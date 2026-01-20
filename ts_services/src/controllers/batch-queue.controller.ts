@@ -2,11 +2,34 @@
  * Batch Queue Controller
  *
  * API v2 controller for batch queue management endpoints.
+ * Integrates with BatchQueueService for real queue operations.
  */
 
+import { injectable } from 'tsyringe';
 import { Logger } from '../utils/logger.js';
 import { BaseRouter, type RouterConfig } from '../routes/index.js';
 import { createSuccessResponse, handleRouteError } from '../middleware/index.js';
+import { getBatchQueueService } from '../domain/batch-queue/batch-queue.service.js';
+import type { BatchQueueService } from '../domain/batch-queue/batch-queue.service.js';
+import { Result } from '../utils/errors/index.js';
+import type {
+  QueueTask,
+  BatchJob,
+  QueueStats,
+  WorkerInfo,
+  QueueTaskStatus,
+  TaskPriority,
+} from '../types/batch.js';
+import type {
+  EnqueueTaskRequest,
+  CreateBatchJobRequest,
+  DequeueTaskRequest,
+  UpdateTaskStatusRequest,
+  CompleteTaskRequest,
+  FailTaskRequest,
+  RegisterWorkerRequest,
+  UpdateWorkerHeartbeatRequest,
+} from '../dtos/batch-queue.dto.js';
 
 const logger = Logger.for('BatchQueueController');
 
@@ -15,13 +38,18 @@ const logger = Logger.for('BatchQueueController');
  *
  * Handles all batch queue management endpoints.
  */
+@injectable()
 export class BatchQueueController extends BaseRouter {
-  constructor() {
+  /** Batch queue service */
+  private readonly service: BatchQueueService;
+
+  constructor(service?: BatchQueueService) {
     const config: RouterConfig = {
       basePath: '/api/v2/queue',
       description: 'Batch queue management endpoints',
     };
     super(config);
+    this.service = service || getBatchQueueService();
     this.registerRoutes();
   }
 
@@ -46,9 +74,30 @@ export class BatchQueueController extends BaseRouter {
 
   private async enqueueTask(input: any) {
     try {
-      const { taskType } = input.body;
-      logger.info(`Enqueue task: ${taskType}`);
-      return createSuccessResponse({ task: { id: `task_${Date.now()}`, taskType, status: 'pending', createdAt: Date.now(), updatedAt: Date.now() }, position: 1, estimatedWait: 0 });
+      const { symbol, parameters, batchId, priority } = input.body;
+      const userId = input.context.userId as string;
+
+      logger.info(`Enqueue task: ${symbol} for user ${userId}`);
+
+      const result = await this.service.enqueueTask({
+        userId,
+        symbol,
+        parameters: parameters || {},
+        batchId,
+        priority,
+      });
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // Get the task to return full details
+      const taskResult = await this.service.getTaskStatus(result.data);
+      if (taskResult.success) {
+        return createSuccessResponse({ task: taskResult.data, position: 1, estimatedWait: 0 });
+      }
+
+      return createSuccessResponse({ taskId: result.data });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -58,7 +107,17 @@ export class BatchQueueController extends BaseRouter {
     try {
       const { workerId } = input.body;
       logger.info(`Dequeue task for worker: ${workerId}`);
-      return createSuccessResponse({ tasks: [], workerId });
+
+      const result = await this.service.dequeueTask({ workerId });
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      const task = result.data;
+      const tasks = task ? [task] : [];
+
+      return createSuccessResponse({ tasks, workerId });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -68,7 +127,14 @@ export class BatchQueueController extends BaseRouter {
     try {
       const { taskId } = input.params;
       logger.info(`Get task: ${taskId}`);
-      return createSuccessResponse({ task: { id: taskId, taskType: 'test', status: 'pending', createdAt: Date.now(), updatedAt: Date.now() } });
+
+      const result = await this.service.getTaskStatus(taskId);
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      return createSuccessResponse({ task: result.data });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -77,8 +143,23 @@ export class BatchQueueController extends BaseRouter {
   private async updateTaskStatus(input: any) {
     try {
       const { taskId } = input.params;
-      const { status } = input.body;
+      const { status, progress, result, error } = input.body;
       logger.info(`Update task status: ${taskId} -> ${status}`);
+
+      // For now, we use acknowledgeTask with success based on status
+      const isSuccess = status === 'completed' || status === 'completed';
+
+      const ackResult = await this.service.acknowledgeTask({
+        taskId,
+        success: isSuccess,
+        result,
+        error,
+      });
+
+      if (!ackResult.success) {
+        return handleRouteError((ackResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
       return createSuccessResponse({ taskId, status, updatedAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
@@ -88,8 +169,19 @@ export class BatchQueueController extends BaseRouter {
   private async completeTask(input: any) {
     try {
       const { taskId } = input.params;
-      const { workerId } = input.body;
+      const { workerId, result } = input.body;
       logger.info(`Complete task: ${taskId}`);
+
+      const ackResult = await this.service.acknowledgeTask({
+        taskId,
+        success: true,
+        result: result ? { data: result, success: true } : undefined,
+      });
+
+      if (!ackResult.success) {
+        return handleRouteError((ackResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
       return createSuccessResponse({ taskId, workerId, status: 'completed', completedAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
@@ -99,9 +191,20 @@ export class BatchQueueController extends BaseRouter {
   private async failTask(input: any) {
     try {
       const { taskId } = input.params;
-      const { workerId } = input.body;
+      const { workerId, error, errorCode } = input.body;
       logger.info(`Fail task: ${taskId}`);
-      return createSuccessResponse({ taskId, workerId, status: 'failed', failedAt: Date.now() });
+
+      const ackResult = await this.service.acknowledgeTask({
+        taskId,
+        success: false,
+        error,
+      });
+
+      if (!ackResult.success) {
+        return handleRouteError((ackResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      return createSuccessResponse({ taskId, workerId, status: 'failed', errorCode, failedAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -110,8 +213,18 @@ export class BatchQueueController extends BaseRouter {
   private async retryTask(input: any) {
     try {
       const { taskId } = input.params;
+      const { priority } = input.body;
       logger.info(`Retry task: ${taskId}`);
-      return createSuccessResponse({ taskId, status: 'pending', retriedAt: Date.now() });
+
+      // Get the task first to check if it exists
+      const getResult = await this.service.getTaskStatus(taskId);
+      if (!getResult.success) {
+        return handleRouteError((getResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // For retry, we would need to re-enqueue the task
+      // For now, return success - the repository handles retries via visibility timeout
+      return createSuccessResponse({ taskId, status: 'queued', retriedAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -121,6 +234,13 @@ export class BatchQueueController extends BaseRouter {
     try {
       const { taskId } = input.params;
       logger.info(`Cancel task: ${taskId}`);
+
+      const result = await this.service.cancelTask(taskId);
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
       return createSuccessResponse({ taskId, status: 'cancelled', cancelledAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
@@ -129,8 +249,24 @@ export class BatchQueueController extends BaseRouter {
 
   private async listTasks(input: any) {
     try {
+      const { status, page = 1, pageSize = 20 } = input.query;
       logger.info('List tasks');
-      return createSuccessResponse({ tasks: [], total: 0, page: 1, pageSize: 20, hasNext: false });
+
+      // Get queue stats (includes counts by status)
+      const statsResult = await this.service.getQueueStats();
+      if (!statsResult.success) {
+        return handleRouteError((statsResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // For now, return empty list with stats
+      // A full implementation would query the repository for paginated tasks
+      return createSuccessResponse({
+        tasks: [],
+        total: statsResult.data.total,
+        page,
+        pageSize,
+        hasNext: false,
+      });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -139,7 +275,27 @@ export class BatchQueueController extends BaseRouter {
   private async getQueueStats(input: any) {
     try {
       logger.info('Get queue stats');
-      return createSuccessResponse({ stats: { pending: 0, inProgress: 0, completed: 0, failed: 0, totalWorkers: 0, activeWorkers: 0 }, timestamp: Date.now() });
+
+      const result = await this.service.getQueueStats();
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // Get workers count
+      const workersResult = await this.service.getAllWorkers();
+      const totalWorkers = workersResult.success ? workersResult.data.length : 0;
+      const activeWorkers = workersResult.success
+        ? workersResult.data.filter(w => w.status === 'busy').length
+        : 0;
+
+      return createSuccessResponse({
+        stats: {
+          ...result.data,
+          totalWorkers,
+          activeWorkers,
+        },
+        timestamp: Date.now(),
+      });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -147,9 +303,45 @@ export class BatchQueueController extends BaseRouter {
 
   private async createBatchJob(input: any) {
     try {
-      const { name, payloads } = input.body;
-      logger.info(`Create batch job: ${name}`);
-      return createSuccessResponse({ job: { id: `job_${Date.now()}`, name, status: 'pending', totalTasks: payloads.length, completedTasks: 0, failedTasks: 0, createdAt: Date.now(), updatedAt: Date.now() }, tasksEnqueued: payloads.length });
+      const { name, payloads, taskType, options } = input.body;
+      const userId = input.context.userId as string;
+
+      // Extract symbols from payloads (assuming symbol is in each payload)
+      const symbols = payloads.map((p: any) => p.symbol || p.stockCode).filter(Boolean);
+
+      if (symbols.length === 0) {
+        return handleRouteError(new Error('No valid symbols found in payloads'), input.context.requestId);
+      }
+
+      logger.info(`Create batch job: ${name} with ${symbols.length} symbols`);
+
+      const result = await this.service.createBatch({
+        userId,
+        name,
+        symbols,
+        parameters: { taskType, ...options },
+        priority: options?.priority,
+      });
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // Get the batch job details
+      const batchResult = await this.service.getBatchStatus(result.data.batchId);
+      if (!batchResult.success) {
+        return createSuccessResponse({
+          batchId: result.data.batchId,
+          taskCount: result.data.taskCount,
+          estimatedDuration: result.data.estimatedDuration,
+          tasksEnqueued: result.data.taskCount,
+        });
+      }
+
+      return createSuccessResponse({
+        job: batchResult.data,
+        tasksEnqueued: result.data.taskCount,
+      });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -158,8 +350,27 @@ export class BatchQueueController extends BaseRouter {
   private async getBatchJob(input: any) {
     try {
       const { jobId } = input.params;
+      const { includeTasks } = input.query;
       logger.info(`Get batch job: ${jobId}`);
-      return createSuccessResponse({ job: { id: jobId, name: 'Test Job', status: 'pending', totalTasks: 10, completedTasks: 0, failedTasks: 0, createdAt: Date.now(), updatedAt: Date.now() }, tasks: [] });
+
+      const result = await this.service.getBatchStatus(jobId);
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      const response: any = { job: result.data };
+      if (includeTasks === 'true') {
+        // Get individual task statuses
+        const tasks = await Promise.all(
+          Object.entries(result.data.taskStatuses).map(async ([taskId, status]) => {
+            const taskResult = await this.service.getTaskStatus(taskId);
+            return taskResult.success ? taskResult.data : null;
+          })
+        );
+        response.tasks = tasks.filter(Boolean);
+      }
+
+      return createSuccessResponse(response);
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -167,8 +378,24 @@ export class BatchQueueController extends BaseRouter {
 
   private async listBatchJobs(input: any) {
     try {
+      const { status, page = 1, pageSize = 20 } = input.query;
       logger.info('List batch jobs');
-      return createSuccessResponse({ jobs: [], total: 0, page: 1, pageSize: 20, hasNext: false });
+
+      // Get batch queue stats
+      const statsResult = await this.service.getBatchQueueStats();
+      if (!statsResult.success) {
+        return handleRouteError((statsResult as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // For now, return empty list with stats
+      // A full implementation would query the repository for paginated batches
+      return createSuccessResponse({
+        jobs: [],
+        total: statsResult.data.activeBatches + statsResult.data.completedBatches + statsResult.data.pendingBatches,
+        page,
+        pageSize,
+        hasNext: false,
+      });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -176,9 +403,39 @@ export class BatchQueueController extends BaseRouter {
 
   private async registerWorker(input: any) {
     try {
-      const { workerId, supportedTypes } = input.body;
+      const { workerId, name, supportedTypes, maxConcurrent, metadata } = input.body;
       logger.info(`Register worker: ${workerId}`);
-      return createSuccessResponse({ worker: { workerId, supportedTypes, status: 'idle', currentTasks: 0, registeredAt: Date.now(), lastHeartbeat: Date.now() }, registeredAt: Date.now() });
+
+      const result = await this.service.registerWorker({
+        id: workerId,
+        type: 'batch', // Default to batch worker
+        status: 'idle',
+        supportedTypes,
+        currentTaskId: undefined,
+        metadata: {
+          name,
+          maxConcurrent,
+          ...metadata,
+        },
+      });
+
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      // Get the worker details
+      const workersResult = await this.service.getAllWorkers();
+      if (workersResult.success) {
+        const worker = workersResult.data.find(w => w.id === workerId);
+        if (worker) {
+          return createSuccessResponse({
+            worker,
+            registeredAt: worker.startedAt,
+          });
+        }
+      }
+
+      return createSuccessResponse({ workerId, registeredAt: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }
@@ -187,7 +444,14 @@ export class BatchQueueController extends BaseRouter {
   private async updateWorkerHeartbeat(input: any) {
     try {
       const { workerId } = input.params;
+      const { currentTasks, status } = input.body;
       logger.info(`Update worker heartbeat: ${workerId}`);
+
+      const result = await this.service.updateWorkerHeartbeat(workerId, currentTasks);
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
       return createSuccessResponse({ workerId, lastHeartbeat: Date.now() });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
@@ -196,8 +460,36 @@ export class BatchQueueController extends BaseRouter {
 
   private async listWorkers(input: any) {
     try {
+      const { status, supportsType } = input.query;
       logger.info('List workers');
-      return createSuccessResponse({ workers: [], total: 0, activeCount: 0, idleCount: 0 });
+
+      const result = await this.service.getAllWorkers();
+      if (!result.success) {
+        return handleRouteError((result as { success: false; error: Error }).error, input.context.requestId);
+      }
+
+      let workers = result.data;
+
+      // Apply filters
+      if (status) {
+        workers = workers.filter(w => w.status === status);
+      }
+      if (supportsType) {
+        workers = workers.filter(w =>
+          w.supportedTypes !== undefined && Array.isArray(w.supportedTypes) &&
+          w.supportedTypes.includes(supportsType)
+        );
+      }
+
+      const activeCount = workers.filter(w => w.status === 'busy').length;
+      const idleCount = workers.filter(w => w.status === 'idle').length;
+
+      return createSuccessResponse({
+        workers,
+        total: workers.length,
+        activeCount,
+        idleCount,
+      });
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
     }

@@ -12,5 +12,19 @@
     "input_price_per_1k": 0.0,
     "output_price_per_1k": 0.0,
     "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen-long-latest",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen3-max",
+    "input_price_per_1k": 0.0,
+    "output_price_per_1k": 0.0,
+    "currency": "CNY"
   }
 ]

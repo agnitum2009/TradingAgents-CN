@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": false,
+    "declaration": false,
+    "sourceMap": false,
+    "outDir": "./build",
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipDefaultLibCheck": true,
+    "noEmitOnError": false
+  },
+  "include": [
+    "src/server.ts",
+    "src/api/v2.router.ts",
+    "src/routes/*.ts",
+    "src/controllers/*.ts",
+    "src/middleware/*.ts",
+    "src/dtos/*.ts",
+    "src/data-sources/*.ts",
+    "src/types/stock-data.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "tests",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "src/domain/analysis/**/*",
+    "src/repositories/**/*",
+    "src/orchestration/**/*",
+    "src/events/**/*",
+    "src/integration/rust-adapters/**/*",
+    "src/utils/errors/**/*",
+    "src/utils/errors.ts",
+    "src/utils/errors/*.ts"
+  ]
+}

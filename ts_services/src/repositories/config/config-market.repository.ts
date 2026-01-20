@@ -235,7 +235,7 @@ export class MarketConfigRepository extends ConfigRepositoryBase {
         updatedAt: now,
         ...category,
       };
-      this.marketCategories.set(category.id, marketCategory);
+      this.marketCategories.set(marketCategory.id, marketCategory);
     }
 
     logger.info('✅ Default market categories initialized');

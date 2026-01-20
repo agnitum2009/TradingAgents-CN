@@ -65,6 +65,7 @@ export class WatchlistController extends BaseRouter {
       const favorite = await repo.addFavorite(userId, {
         stockCode,
         stockName: stockName || stockCode,
+        market: 'A股', // Default market, should be determined from stock code
         notes: notes || '',
         tags: tags || [],
       });

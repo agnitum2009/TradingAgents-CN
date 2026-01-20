@@ -256,6 +256,12 @@ export interface ResponseMeta {
   version: string;
   /** Response time in milliseconds */
   responseTime?: number;
+  /** Whether response was from cache */
+  cached?: boolean;
+  /** Data source/adapter */
+  source?: string;
+  /** Cache adapters info */
+  adapters?: string[];
 }
 
 /**

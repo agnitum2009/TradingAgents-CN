@@ -292,7 +292,7 @@ export class ConfigService {
     try {
       const configResult = await this.getSystemConfig();
       if (!configResult.success) {
-        return Result.error(configResult.error);
+        return Result.error((configResult as { success: false; error: TacnError }).error);
       }
 
       const config = configResult.data;

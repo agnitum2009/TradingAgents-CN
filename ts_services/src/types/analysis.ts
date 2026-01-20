@@ -524,15 +524,15 @@ export interface AnalysisBatch extends Entity {
   /** Total tasks */
   totalTasks: number;
   /** Completed tasks */
-  completedTasks?: number;
+  completedTasks: number;
   /** Failed tasks */
   failedTasks?: number;
+  /** Progress percentage (0-100) */
+  progress?: number;
   /** Analysis parameters (shared by all tasks) */
   parameters: AnalysisParameters;
   /** Batch status */
   status: BatchStatus;
-  /** Created timestamp */
-  createdAt?: number;
   /** Started timestamp */
   startedAt?: number;
   /** Completed timestamp */

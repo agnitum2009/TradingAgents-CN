@@ -1,4 +1,8 @@
-import { ApiClient } from './request'
+/**
+ * Favorites API (Watchlist) (v2 Only)
+ */
+
+import { watchlistApi as watchlistApiV2 } from '@/utils/api'
 
 export interface FavoriteItem {
   symbol?: string  // 主字段：6位股票代码
@@ -28,55 +32,77 @@ export interface AddFavoriteReq {
   alert_price_low?: number | null
 }
 
+/**
+ * Favorites API (Watchlist) (v2 Only)
+ */
 export const favoritesApi = {
   /**
    * 获取收藏列表
    */
-  list: () => ApiClient.get<FavoriteItem[]>('/api/favorites/'),
+  async list(): Promise<FavoriteItem[]> {
+    const response = await watchlistApiV2.list({ includeQuotes: true })
+    // Map v2 response to FavoriteItem format
+    return (response.data.data.items || []).map((item: any) => ({
+      symbol: item.stockCode,
+      stock_code: item.stockCode,
+      stock_name: item.stockName,
+      market: item.market,
+      board: item.board,
+      exchange: item.exchange,
+      added_at: item.addedAt,
+      tags: item.tags,
+      notes: item.notes,
+      alert_price_high: item.alertPriceHigh,
+      alert_price_low: item.alertPriceLow,
+      current_price: item.currentPrice,
+      change_percent: item.changePercent,
+      volume: item.volume
+    }))
+  },
 
   /**
    * 添加收藏
-   * @param payload 收藏信息（需包含 symbol 或 stock_code）
    */
-  add: (payload: AddFavoriteReq) => ApiClient.post<{ message: string; symbol?: string; stock_code?: string }>('/api/favorites/', payload),
+  async add(payload: AddFavoriteReq): Promise<{ message: string; symbol?: string; stock_code?: string }> {
+    const response = await watchlistApiV2.add({
+      stockCode: payload.symbol || payload.stock_code,
+      stockName: payload.stock_name,
+      market: payload.market || 'A股',
+      notes: payload.notes,
+      tags: payload.tags
+    })
+    return { message: 'Added to favorites', symbol: payload.symbol || payload.stock_code }
+  },
 
   /**
    * 更新收藏
-   * @param symbol 股票代码（6位）
-   * @param payload 更新内容
+   * @param id Item ID
    */
-  update: (symbol: string, payload: Partial<Pick<FavoriteItem, 'tags' | 'notes' | 'alert_price_high' | 'alert_price_low'>>) =>
-    ApiClient.put<{ message: string; symbol?: string; stock_code?: string }>(`/api/favorites/${symbol}`, payload),
+  async update(id: string, payload: Partial<Pick<FavoriteItem, 'tags' | 'notes' | 'alert_price_high' | 'alert_price_low'>>): Promise<{ message: string; symbol?: string }> {
+    const updatePayload: any = {}
+    if (payload.tags) updatePayload.tags = payload.tags
+    if (payload.notes) updatePayload.notes = payload.notes
+    if (payload.alert_price_high !== undefined) updatePayload.alertPriceHigh = payload.alert_price_high
+    if (payload.alert_price_low !== undefined) updatePayload.alertPriceLow = payload.alert_price_low
+
+    await watchlistApiV2.update(id, updatePayload)
+    return { message: 'Updated', symbol: id }
+  },
 
   /**
    * 删除收藏
-   * @param symbol 股票代码（6位）
+   * @param id Item ID
    */
-  remove: (symbol: string) => ApiClient.delete<{ message: string; symbol?: string; stock_code?: string }>(`/api/favorites/${symbol}`),
-
-  /**
-   * 检查是否已收藏
-   * @param symbol 股票代码（6位）
-   */
-  check: (symbol: string) => ApiClient.get<{ symbol?: string; stock_code?: string; is_favorite: boolean }>(`/api/favorites/check/${symbol}`),
+  async remove(id: string): Promise<{ message: string }> {
+    await watchlistApiV2.remove(id)
+    return { message: 'Removed' }
+  },
 
   /**
    * 获取所有标签
    */
-  tags: () => ApiClient.get<string[]>('/api/favorites/tags'),
-
-  /**
-   * 同步自选股实时行情
-   * @param data_source 数据源（tushare/akshare）
-   */
-  syncRealtime: (data_source: string = 'tushare') =>
-    ApiClient.post<{
-      total: number
-      success_count: number
-      failed_count: number
-      symbols: string[]
-      data_source: string
-      message: string
-    }>('/api/favorites/sync-realtime', { data_source })
+  async tags(): Promise<string[]> {
+    const response = await watchlistApiV2.getTags()
+    return (response.data.data.tags || []).map((t: any) => t.tag || t)
+  }
 }
-

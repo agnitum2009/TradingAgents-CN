@@ -10,6 +10,7 @@ export { Validator as ValidatorNew } from './validator/index.js';
 export { validators as validatorsNew } from './validator/index.js';
 export { SchemaValidator as SchemaValidatorNew } from './validator/index.js';
 export * from './errors/index.js';
+export * from './api-cache.js';
 // Re-export from old errors for backward compatibility during transition
 export {
   TacnError as TacnErrorOld,

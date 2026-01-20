@@ -78,7 +78,6 @@ const DEFAULT_SYSTEM_CONFIG: Omit<SystemConfig, 'id' | 'createdAt' | 'updatedAt'
  */
 const DEFAULT_MARKET_CATEGORIES: Omit<MarketCategory, 'id' | 'createdAt' | 'updatedAt'>[] = [
   {
-    id: 'a_shares',
     name: 'a_shares',
     displayName: 'A股',
     description: '中国A股市场数据源',
@@ -86,7 +85,6 @@ const DEFAULT_MARKET_CATEGORIES: Omit<MarketCategory, 'id' | 'createdAt' | 'upda
     sortOrder: 1,
   },
   {
-    id: 'us_stocks',
     name: 'us_stocks',
     displayName: '美股',
     description: '美国股票市场数据源',
@@ -94,7 +92,6 @@ const DEFAULT_MARKET_CATEGORIES: Omit<MarketCategory, 'id' | 'createdAt' | 'upda
     sortOrder: 2,
   },
   {
-    id: 'hk_stocks',
     name: 'hk_stocks',
     displayName: '港股',
     description: '香港股票市场数据源',
@@ -102,7 +99,6 @@ const DEFAULT_MARKET_CATEGORIES: Omit<MarketCategory, 'id' | 'createdAt' | 'upda
     sortOrder: 3,
   },
   {
-    id: 'crypto',
     name: 'crypto',
     displayName: '数字货币',
     description: '数字货币市场数据源',
@@ -110,7 +106,6 @@ const DEFAULT_MARKET_CATEGORIES: Omit<MarketCategory, 'id' | 'createdAt' | 'upda
     sortOrder: 4,
   },
   {
-    id: 'futures',
     name: 'futures',
     displayName: '期货',
     description: '期货市场数据源',
@@ -236,7 +231,7 @@ export class ConfigRepository extends MemoryRepository<SystemConfig> {
         updatedAt: now,
         ...category,
       };
-      this.marketCategories.set(category.id, marketCategory);
+      this.marketCategories.set(marketCategory.id, marketCategory);
     }
 
     logger.info('✅ Default configurations initialized');

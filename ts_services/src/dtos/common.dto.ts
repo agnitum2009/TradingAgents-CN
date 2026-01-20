@@ -31,6 +31,14 @@ export interface StockCodeParam {
 }
 
 /**
+ * Stock symbol parameter in path
+ */
+export interface StockSymbolParam {
+  /** Stock symbol (e.g., 000001) */
+  symbol: string;
+}
+
+/**
  * List query parameters
  */
 export interface ListQuery extends PaginationParams {

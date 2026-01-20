@@ -11,6 +11,7 @@
 
 import { TacnError } from './error-types.js';
 import { ErrorHandler } from './error-handler.js';
+import type { Result } from './result-type.js';
 
 /**
  * Retry utility for operations that can fail

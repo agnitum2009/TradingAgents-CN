@@ -107,7 +107,7 @@ describe('Performance Benchmarks', () => {
       await runner.run(
         'repo-find',
         async () => {
-          await repo.findById('test-1');
+          await repo.get('test-1');
         },
         { maxTime: 1, minOps: 1000, description: 'Find by ID in repository' }
       );
@@ -124,7 +124,7 @@ describe('Performance Benchmarks', () => {
       await runner.run(
         'eventbus-emit',
         async () => {
-          await bus.emit('test-event', { data: 'test' });
+          await bus.publish({ type: 'test-event', timestamp: Date.now(), eventId: 'test-1' } as any);
         },
         { maxTime: 1, minOps: 1000, description: 'Emit event' }
       );
@@ -143,7 +143,7 @@ describe('Performance Benchmarks', () => {
       await runner.run(
         'eventbus-emit-multicast',
         async () => {
-          await bus.emit('test-event', { data: 'test' });
+          await bus.publish({ type: 'test-event', timestamp: Date.now(), eventId: 'test-1' } as any);
         },
         { maxTime: 5, minOps: 200, description: 'Emit to multiple subscribers' }
       );

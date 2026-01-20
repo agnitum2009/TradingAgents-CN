@@ -515,4 +515,81 @@ export class NetworkError extends TacnError {
       { hostname },
     );
   }
+
+  /**
+   * Create a timeout error
+   */
+  static timeout(host: string, timeoutMs: number): NetworkError {
+    return new NetworkError(
+      'NET_TIMEOUT',
+      `Request timeout: ${host} after ${timeoutMs}ms`,
+      { host, timeout: timeoutMs },
+    );
+  }
+}
+
+/**
+ * Rate limit error - thrown when API rate limit is exceeded
+ *
+ * @example
+ * throw new RateLimitError('RATE_001', 'Rate limit exceeded', {
+ *   limit: 100,
+ *   window: '60s',
+ *   retryAfter: 30
+ * });
+ */
+export class RateLimitError extends TacnError {
+  constructor(code: string, message: string, details?: unknown) {
+    super(code, message, details, ErrorSeverity.MEDIUM, ErrorCategory.BUSINESS);
+    this.name = 'RateLimitError';
+  }
+
+  /**
+   * Create a rate limit exceeded error
+   */
+  static exceeded(limit: number, window: string, retryAfter?: number): RateLimitError {
+    return new RateLimitError(
+      'RATE_EXCEEDED',
+      `Rate limit exceeded: ${limit} requests per ${window}`,
+      { limit, window, retryAfter },
+    );
+  }
+}
+
+/**
+ * Conflict error - thrown when resource state conflicts with operation
+ *
+ * @example
+ * throw new ConflictError('CONF_001', 'Resource already exists', {
+ *   resource: 'Stock',
+ *   code: '600519.SH'
+ * });
+ */
+export class ConflictError extends TacnError {
+  constructor(code: string, message: string, details?: unknown) {
+    super(code, message, details, ErrorSeverity.LOW, ErrorCategory.BUSINESS);
+    this.name = 'ConflictError';
+  }
+
+  /**
+   * Create an already exists error
+   */
+  static alreadyExists(resourceType: string, identifier: Record<string, unknown>): ConflictError {
+    return new ConflictError(
+      'CONF_EXISTS',
+      `${resourceType} already exists`,
+      { resourceType, identifier },
+    );
+  }
+
+  /**
+   * Create a version conflict error
+   */
+  static versionConflict(resourceType: string, expectedVersion: number, actualVersion: number): ConflictError {
+    return new ConflictError(
+      'CONF_VERSION',
+      `Version conflict for ${resourceType}`,
+      { resourceType, expectedVersion, actualVersion },
+    );
+  }
 }

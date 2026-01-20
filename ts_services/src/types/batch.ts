@@ -334,7 +334,7 @@ export interface BatchStatusResponse {
 /**
  * Get task status response
  */
-export interface TaskStatusResponse {
+export interface BatchTaskStatusResponse {
   /** Task ID */
   taskId: string;
   /** Status */
@@ -369,12 +369,16 @@ export interface WorkerInfo {
   status: 'idle' | 'busy' | 'offline';
   /** Current task ID */
   currentTaskId?: string;
+  /** Supported task types */
+  supportedTypes?: string[];
   /** Tasks processed */
   tasksProcessed: number;
   /** Last heartbeat timestamp */
   lastHeartbeat: number;
   /** Started timestamp */
   startedAt: number;
+  /** Worker metadata */
+  metadata?: Record<string, unknown>;
 }
 
 /**

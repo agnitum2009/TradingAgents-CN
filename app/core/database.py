@@ -362,6 +362,19 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        # daily_analysis_history 的索引（每日分析模块）
+        daily_analysis = db["daily_analysis_history"]
+        # 复合索引：股票代码 + 类型 + 创建时间（查询历史记录）
+        await daily_analysis.create_index([("code", 1), ("type", 1), ("created_at", -1)])
+        # 复合索引：类型 + 复盘日期（大盘复盘查询）
+        await daily_analysis.create_index([("type", 1), ("review_date", -1)])
+        # 复合索引：类型 + 分析日期（按分析日期查询）
+        await daily_analysis.create_index([("type", 1), ("analysis_date", -1)])
+        # 单字段索引：股票代码（按股票查询）
+        await daily_analysis.create_index([("code", 1)])
+        # 单字段索引：创建时间（时间范围查询）
+        await daily_analysis.create_index([("created_at", -1)])
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

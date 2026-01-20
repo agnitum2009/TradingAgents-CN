@@ -146,7 +146,35 @@ RUN export PATH="$HOME/.cargo/bin:$PATH" && \
     # 移除 Rust 工具链 (可选，减小镜像体积)
     rm -rf $HOME/.cargo $HOME/.rustup
 
+# ========================================
+# TypeScript 服务层 (Phase 4-01: v2.0 架构)
+# ========================================
+# 安装 Node.js (TypeScript 运行时)
+RUN echo "==> 安装 Node.js..." && \
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y nodejs && \
+    node --version && \
+    npm --version && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "Node.js 安装完成"
+
+# 复制 ts_services 源代码
+COPY ts_services ./ts_services
+
+# 安装 TypeScript 依赖并构建
+WORKDIR /app/ts_services
+RUN npm install && \
+    npm run build && \
+    echo "TypeScript 服务构建完成" && \
+    # 验证构建
+    node -e "require('reflect-metadata'); const ts = require('./build/index.js'); console.log('TS Services OK:', Object.keys(ts).length);" || \
+    echo "警告: TypeScript 服务验证失败"
+
+WORKDIR /app
+
+# ========================================
 # 复制后端代码和必需模块
+# ========================================
 COPY app ./app
 COPY tradingagents ./tradingagents
 COPY chanlun ./chanlun

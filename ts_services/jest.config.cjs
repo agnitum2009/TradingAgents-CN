@@ -26,5 +26,11 @@ module.exports = {
   },
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   verbose: true,
-  testTimeout: 10000,
+  testTimeout: 30000, // Increase timeout for API calls
+  // Test environment variables
+  globals: {
+    'ts-jest': {
+      isolatedModules: true,
+    },
+  },
 };

@@ -92,7 +92,6 @@ export interface IRepository<T extends Entity> {
  * Abstract base class for all repositories.
  * Uses Python backend via adapter for data persistence.
  */
-@injectable()
 export abstract class Repository<T extends Entity> implements IRepository<T> {
   protected readonly logger: Logger;
   protected readonly collectionName: string;
@@ -327,7 +326,6 @@ export abstract class Repository<T extends Entity> implements IRepository<T> {
  * In-memory repository for testing and caching.
  * Does not persist to database.
  */
-@injectable()
 export abstract class MemoryRepository<T extends Entity> implements IRepository<T> {
   protected readonly data = new Map<string, T>();
   protected readonly logger: Logger;
@@ -510,7 +508,7 @@ export abstract class MemoryRepository<T extends Entity> implements IRepository<
 @injectable()
 export class CacheRepository<T extends Entity> implements IRepository<T> {
   private readonly cache = new Map<string, { entity: T; expiresAt: number }>();
-  private readonly queryCache = new Map<string, { result: T[] | PaginatedResponse<T> | number; expiresAt: number }>();
+  private readonly queryCache = new Map<string, { result: unknown; expiresAt: number }>();
   private readonly cacheTTL: number;
   private readonly queryCacheTTL: number;
 
@@ -563,14 +561,15 @@ export class CacheRepository<T extends Entity> implements IRepository<T> {
 
     if (cached && cached.expiresAt > Date.now()) {
       this.stats.hits++;
-      return cached.result as T | null;
+      // Cast through unknown to handle the union type
+      return cached.result as unknown as T | null;
     }
 
     this.stats.misses++;
     const result = await this.repository.findOne(filter);
 
     this.queryCache.set(cacheKey, {
-      result: result as T[] | null,
+      result,
       expiresAt: Date.now() + this.queryCacheTTL,
     });
 

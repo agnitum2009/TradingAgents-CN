@@ -50,11 +50,19 @@ export default defineConfig({
       allow: [resolve(__dirname, '..')]
     },
     proxy: {
+      // v2 API routes to TypeScript backend
+      '/api/v2': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false,
+        ws: true  // WebSocket support for v2
+      },
+      // v1 API routes to Python backend (default)
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-        ws: true  // 🔥 启用 WebSocket 代理支持
+        ws: true  // WebSocket support for v1
       }
     }
   },

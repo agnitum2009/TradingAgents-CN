@@ -6,7 +6,7 @@
  */
 
 import { injectable, singleton } from 'tsyringe';
-import type { Kline, TechnicalIndicators, WordcloudData } from '../types';
+import type { Kline, TechnicalIndicators, WordCloudData } from '../types';
 import { Logger } from '../utils/logger';
 import { PythonAdapter, createPythonAdapter } from './python-adapter';
 
@@ -164,13 +164,13 @@ export class RustAdapter {
       minFrequency?: number;
       stopWords?: string[];
     },
-  ): Promise<WordcloudData> {
+  ): Promise<WordCloudData> {
     if (!this.isModuleAvailable('wordcloud')) {
       throw new Error('Rust wordcloud module not available');
     }
 
     try {
-      const result = await this.pythonAdapter.call<WordcloudData>(
+      const result = await this.pythonAdapter.call<WordCloudData>(
         'rust_generate_wordcloud',
         text,
         options ?? {},
@@ -180,7 +180,7 @@ export class RustAdapter {
       this.logger.error('Rust wordcloud generation failed', { error });
       if (this.config.fallbackOnFailure) {
         this.logger.info('Falling back to Python implementation');
-        return this.pythonAdapter.call<WordcloudData>(
+        return this.pythonAdapter.call<WordCloudData>(
           'python_generate_wordcloud',
           text,
           options ?? {},
@@ -338,7 +338,7 @@ export async function generateWordcloud(
     minFrequency?: number;
     stopWords?: string[];
   },
-): Promise<WordcloudData> {
+): Promise<WordCloudData> {
   const adapter = getRustAdapter();
   if (!adapter['initialized']) {
     await adapter.initialize();

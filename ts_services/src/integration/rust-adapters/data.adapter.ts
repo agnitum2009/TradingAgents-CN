@@ -5,7 +5,7 @@
  * Provides high-performance data processing operations.
  */
 
-import { RustAdapter } from '../integration/rust-adapter.js';
+import { RustAdapter } from '../rust-adapter.js';
 import type { KlineData, MergedKline, StatsResult } from '../../types/index.js';
 import { Logger } from '../../utils/logger.js';
 

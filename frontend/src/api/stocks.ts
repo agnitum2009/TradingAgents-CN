@@ -1,10 +1,15 @@
-import { ApiClient } from './request'
-import { stockDataApi } from '@/utils/api'
+/**
+ * Stock Data API (v2 Only)
+ *
+ * Uses TypeScript v2 API endpoints only.
+ * Base URL: http://localhost:3001/api/v2/stocks
+ */
+
+import { stockDataApi, financialDataApi } from '@/utils/api'
 
 export interface QuoteResponse {
-  symbol: string  // 主字段：6位股票代码
-  code?: string   // 兼容字段（已废弃）
-  full_symbol?: string  // 完整代码（如 000001.SZ）
+  symbol: string
+  full_symbol?: string
   name?: string
   market?: string
   price?: number
@@ -12,34 +17,33 @@ export interface QuoteResponse {
   amount?: number
   prev_close?: number
   turnover_rate?: number
-  amplitude?: number  // 振幅（替代量比）
+  amplitude?: number
   trade_date?: string
   updated_at?: string
 }
 
 export interface FundamentalsResponse {
-  symbol: string  // 主字段：6位股票代码
-  code?: string   // 兼容字段（已废弃）
-  full_symbol?: string  // 完整代码（如 000001.SZ）
+  symbol: string
+  full_symbol?: string
   name?: string
   industry?: string
   market?: string
-  sector?: string  // 板块
+  sector?: string
   pe?: number
   pb?: number
-  ps?: number      // 🔥 新增：市销率
+  ps?: number
   pe_ttm?: number
   pb_mrq?: number
-  ps_ttm?: number  // 🔥 新增：市销率（TTM）
+  ps_ttm?: number
   roe?: number
-  debt_ratio?: number  // 🔥 新增：负债率
+  debt_ratio?: number
   total_mv?: number
   circ_mv?: number
   turnover_rate?: number
   volume_ratio?: number
-  pe_is_realtime?: boolean  // PE是否为实时数据
-  pe_source?: string        // PE数据来源
-  pe_updated_at?: string    // PE更新时间
+  pe_is_realtime?: boolean
+  pe_source?: string
+  pe_updated_at?: string
   updated_at?: string
 }
 
@@ -53,12 +57,14 @@ export interface KlineBar {
   amount?: number
 }
 
+export type KlinePeriod = 'day' | 'week' | 'month' | '5m' | '15m' | '30m' | '60m'
+export type KlineAdjust = 'none' | 'qfq' | 'hfq'
+
 export interface KlineResponse {
-  symbol: string  // 主字段：6位股票代码
-  code?: string   // 兼容字段（已废弃）
-  period: 'day'|'week'|'month'|'5m'|'15m'|'30m'|'60m'
+  symbol: string
+  period: KlinePeriod
   limit: number
-  adj: 'none'|'qfq'|'hfq'
+  adj: KlineAdjust
   source?: string
   items: KlineBar[]
 }
@@ -72,8 +78,7 @@ export interface NewsItem {
 }
 
 export interface NewsResponse {
-  symbol: string  // 主字段：6位股票代码
-  code?: string   // 兼容字段（已废弃）
+  symbol: string
   days: number
   limit: number
   include_announcements: boolean
@@ -81,30 +86,27 @@ export interface NewsResponse {
   items: NewsItem[]
 }
 
-/**
- * Map period from frontend format to API v2 format
- */
-function mapPeriod(period: KlineResponse['period']): string {
-  const periodMap: Record<KlineResponse['period'], string> = {
-    '5m': 'M5',
-    '15m': 'M15',
-    '30m': 'M30',
-    '60m': 'M60',
-    'day': 'D',
-    'week': 'W',
-    'month': 'M',
+// Map period from frontend format to API v2 format
+function mapPeriod(period: KlinePeriod): string {
+  const periodMap: Record<KlinePeriod, string> = {
+    '5m': '5m',
+    '15m': '15m',
+    '30m': '30m',
+    '60m': '60m',
+    'day': '1d',
+    'week': '1w',
+    'month': '1M',
   }
-  return periodMap[period] || 'D'
+  return periodMap[period] || '1d'
 }
 
-/**
- * Map Kline data from API v2 format to frontend format
- */
-function mapKlineResponse(data: any, symbol: string, period: KlineResponse['period'], limit: number): KlineResponse {
+// Map Kline data from API v2 format to frontend format
+function mapKlineResponse(response: any, symbol: string, period: KlinePeriod, limit: number): KlineResponse {
   const items: KlineBar[] = []
+  const data = response.data?.data
 
-  if (data.data && Array.isArray(data.data)) {
-    for (const item of data.data) {
+  if (data && Array.isArray(data)) {
+    for (const item of data) {
       items.push({
         time: item.timestamp || item.time || '',
         open: item.open,
@@ -122,82 +124,136 @@ function mapKlineResponse(data: any, symbol: string, period: KlineResponse['peri
     period,
     limit,
     adj: 'none',
-    source: data.meta?.source || 'unknown',
+    source: response.data?.meta?.source || 'unknown',
     items,
   }
 }
 
-/**
- * Map quote data from API v2 format to frontend format
- */
-function mapQuoteResponse(data: any, symbol: string): QuoteResponse {
+// Map quote data from API v2 format to frontend format
+function mapQuoteResponse(response: any, symbol: string): QuoteResponse {
+  const data = response.data?.data
   return {
     symbol,
-    code: data.data?.code,
-    full_symbol: data.data?.code,
-    name: data.data?.name,
-    market: data.data?.market,
-    price: data.data?.price,
-    change_percent: data.data?.changePercent,
-    amount: data.data?.amount,
-    prev_close: data.data?.preClose,
-    updated_at: new Date(data.data?.timestamp || Date.now()).toISOString(),
+    full_symbol: data?.code,
+    name: data?.name,
+    market: data?.market,
+    price: data?.price,
+    change_percent: data?.changePercent,
+    amount: data?.amount,
+    prev_close: data?.preClose,
+    turnover_rate: data?.turnoverRate,
+    updated_at: new Date(data?.timestamp || Date.now()).toISOString(),
   }
 }
 
 export const stocksApi = {
   /**
-   * 获取股票行情 (使用 TypeScript API v2)
+   * Get stock quote
+   * GET /api/v2/stocks/:code/quote
    * @param symbol 6位股票代码
    */
   async getQuote(symbol: string): Promise<QuoteResponse> {
-    try {
-      const response = await stockDataApi.getQuote(symbol)
-      return mapQuoteResponse(response.data, symbol)
-    } catch (error) {
-      // Fallback to Python API if TS API fails
-      console.warn('[stocksApi] TS API failed, falling back to Python API', error)
-      return ApiClient.get<QuoteResponse>(`/api/stocks/${symbol}/quote`)
+    const response = await stockDataApi.getQuote(symbol)
+    return mapQuoteResponse(response, symbol)
+  },
+
+  /**
+   * Get fundamentals data
+   * GET /api/v2/financial-data/query/:symbol
+   * @param symbol 6位股票代码
+   */
+  async getFundamentals(symbol: string): Promise<FundamentalsResponse> {
+    const response = await financialDataApi.query(symbol, { limit: 1 })
+    const data = response.data?.data
+
+    if (!data?.financial_data?.[0]) {
+      throw new Error('No financial data found')
+    }
+
+    const financialData = data.financial_data[0]
+    return {
+      symbol: financialData.symbol || symbol,
+      full_symbol: data.code,
+      name: data.name,
+      industry: data.industry,
+      market: data.market,
+      sector: data.sector,
+      pe: financialData.financial_indicators?.pe,
+      pb: financialData.financial_indicators?.pb,
+      ps: financialData.financial_indicators?.ps,
+      pe_ttm: financialData.financial_indicators?.pe_ttm,
+      pb_mrq: financialData.financial_indicators?.pb_mrq,
+      ps_ttm: financialData.financial_indicators?.ps_ttm,
+      roe: financialData.financial_indicators?.roe,
+      debt_ratio: financialData.financial_indicators?.debt_to_assets,
+      total_mv: data.market_cap,
+      circ_mv: data.circulating_market_cap,
+      turnover_rate: financialData.financial_indicators?.turnover_rate,
+      volume_ratio: data.volume_ratio,
+      updated_at: response.data?.meta?.timestamp,
     }
   },
 
   /**
-   * 获取股票基本面数据 (使用 Python API)
-   * @param symbol 6位股票代码
-   */
-  async getFundamentals(symbol: string) {
-    return ApiClient.get<FundamentalsResponse>(`/api/stocks/${symbol}/fundamentals`)
-  },
-
-  /**
-   * 获取K线数据 (使用 TypeScript API v2)
+   * Get K-line data
+   * GET /api/v2/stocks/:code/kline
    * @param symbol 6位股票代码
    * @param period K线周期
    * @param limit 数据条数
    * @param adj 复权方式
    */
-  async getKline(symbol: string, period: KlineResponse['period'] = 'day', limit = 120, adj: KlineResponse['adj'] = 'none'): Promise<KlineResponse> {
-    try {
-      const response = await stockDataApi.getKline(symbol, {
-        interval: mapPeriod(period),
-        limit,
-      })
-      return mapKlineResponse(response.data, symbol, period, limit)
-    } catch (error) {
-      // Fallback to Python API if TS API fails
-      console.warn('[stocksApi] TS API failed, falling back to Python API', error)
-      return ApiClient.get<KlineResponse>(`/api/stocks/${symbol}/kline`, { period, limit, adj })
-    }
+  async getKline(
+    symbol: string,
+    period: KlinePeriod = 'day',
+    limit = 120,
+    adj: KlineAdjust = 'none'
+  ): Promise<KlineResponse> {
+    const response = await stockDataApi.getKline(symbol, {
+      interval: mapPeriod(period),
+      limit,
+      adjust: adj,
+    })
+    return mapKlineResponse(response, symbol, period, limit)
   },
 
   /**
-   * 获取股票新闻 (使用 Python API)
-   * @param symbol 6位股票代码
-   * @param days 天数
-   * @param limit 数量限制
-   * @param includeAnnouncements 是否包含公告
+   * Get batch quotes
+   * POST /api/v2/stocks/quotes/batch
+   * @param codes 股票代码列表
    */
-  async getNews(symbol: string, days = 30, limit = 50, includeAnnouncements = true) {
-    return ApiClient.get<NewsResponse>(`/api/stocks/${symbol}/news`, { days, limit, include_announcements: includeAnnouncements })
+  async getBatchQuotes(codes: string[]): Promise<QuoteResponse[]> {
+    const response = await stockDataApi.getBatchQuotes(codes)
+    const items = response.data?.data?.items || []
+
+    return items.map((item: any, index: number) =>
+      mapQuoteResponse({ data: { data: item } }, codes[index] || '')
+    )
+  },
+
+  /**
+   * Get stock list
+   * GET /api/v2/stocks/list
+   */
+  async getStockList(params?: { page?: number; pageSize?: number; market?: string }) {
+    const response = await stockDataApi.getStockList(params)
+    return response.data?.data
+  },
+
+  /**
+   * Search stocks
+   * GET /api/v2/stocks/search
+   */
+  async searchStocks(keyword: string, limit?: number) {
+    const response = await stockDataApi.searchStocks(keyword, limit)
+    return response.data?.data
+  },
+
+  /**
+   * Get markets summary
+   * GET /api/v2/stocks/markets/summary
+   */
+  async getMarketsSummary() {
+    const response = await stockDataApi.getMarketsSummary()
+    return response.data?.data
   }
 }

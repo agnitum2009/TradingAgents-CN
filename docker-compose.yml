@@ -1,9 +1,56 @@
 services:
+  ts-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.ts-api
+    image: tradingagents-ts-api:v2.0.0
+    container_name: tradingagents-ts-api
+    ports:
+    - 3001:3001
+    environment:
+      NODE_ENV: production
+      TS_SERVICES_HOST: 0.0.0.0
+      TS_SERVICES_PORT: '3001'
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8080,http://localhost:5173
+      TZ: Asia/Shanghai
+      # Database connections (same as backend)
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: '27017'
+      MONGODB_DATABASE: tradingagents
+      MONGODB_USERNAME: tradingagents
+      MONGODB_PASSWORD: tradingagents123
+      MONGODB_AUTH_SOURCE: admin
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: tradingagents123
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+    - tradingagents-network
+    healthcheck:
+      test:
+      - CMD
+      - node
+      - -e
+      - "require('http').get('http://localhost:3001/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: '2'
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    image: tradingagents-backend:v1.0.8
+    image: tradingagents-backend:v2.0.0
     container_name: tradingagents-backend
     ports:
     - 8000:8000
@@ -20,7 +67,7 @@ services:
       TRADINGAGENTS_LOG_LEVEL: INFO
       TRADINGAGENTS_LOG_DIR: /app/logs
       TRADINGAGENTS_LOG_FILE: /app/logs/tradingagents.log
-      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
+      TRADINGAGENTS_MONGODB_URL: mongodb://tradingagents:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
       DOCKER_CONTAINER: 'true'
@@ -57,13 +104,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    image: tradingagents-frontend:v1.0.8
+    image: tradingagents-frontend:v2.0.0
     container_name: tradingagents-frontend
     ports:
     - 3000:80
     environment:
       TZ: Asia/Shanghai
       VITE_API_BASE_URL: http://localhost:8000
+      VITE_API_V2_BASE_URL: http://localhost:3001
     depends_on:
       backend:
         condition: service_healthy

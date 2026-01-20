@@ -39,6 +39,7 @@ yarn-error.log*
 *~
 
 # 环境
+.env
 .env.local
 .env.*.local
 
@@ -48,3 +49,5 @@ yarn-error.log*
 *.seed
 *.pid.lock
 平铺.png
+nul
+daily_stock_analysis/

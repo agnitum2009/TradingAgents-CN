@@ -10,6 +10,8 @@ import { AnalysisController } from '../controllers/analysis.controller.js';
 import { AuthController } from '../controllers/auth.controller.js';
 import { BatchQueueController } from '../controllers/batch-queue.controller.js';
 import { ConfigController } from '../controllers/config.controller.js';
+import { FinancialDataController } from '../controllers/financial-data.controller.js';
+import { HistoricalDataController } from '../controllers/historical-data.controller.js';
 import { NewsController } from '../controllers/news.controller.js';
 import { StockDataController } from '../controllers/stock-data.controller.js';
 import { WatchlistController } from '../controllers/watchlist.controller.js';
@@ -102,6 +104,22 @@ export class ApiV2Router {
         instance: new StockDataController(),
         basePath: '/api/v2/stocks',
         description: 'Stock data endpoints (TypeScript native)',
+      });
+
+      // Financial Data controller
+      this.controllers.push({
+        name: 'FinancialData',
+        instance: new FinancialDataController(),
+        basePath: '/api/v2/financial-data',
+        description: 'Financial data endpoints (TypeScript native)',
+      });
+
+      // Historical Data controller
+      this.controllers.push({
+        name: 'HistoricalData',
+        instance: new HistoricalDataController(),
+        basePath: '/api/v2/historical-data',
+        description: 'Historical K-line data endpoints (TypeScript native)',
       });
 
       logger.info(`Registered ${this.controllers.length} controllers for API v2`);

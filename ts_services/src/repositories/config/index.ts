@@ -10,10 +10,11 @@
  * - config-datasource.repository.ts: Data source configuration operations
  * - config-market.repository.ts: Market categories and groupings
  * - config-usage.repository.ts: Usage tracking operations
- * - index-new.ts: Main repository orchestrator
+ * Note: index-new.ts is WIP (incomplete implementation)
  */
 
-export { ConfigRepository, getConfigRepository } from './index-new.js';
+// Use old config.repository for now (new implementation is WIP)
+export { ConfigRepository as ConfigRepository, getConfigRepository } from '../config.repository.js';
 export { SystemConfigRepository } from './config-system.repository.js';
 export { LLMConfigRepository } from './config-llm.repository.js';
 export { DataSourceConfigRepository } from './config-datasource.repository.js';
@@ -24,6 +25,3 @@ export {
   DEFAULT_SYSTEM_CONFIG,
   DEFAULT_MARKET_CATEGORIES,
 } from './config-base.repository.js';
-
-// Re-export from old config.repository for backward compatibility during transition
-export { ConfigRepository as ConfigRepositoryOld } from '../config.repository.js';

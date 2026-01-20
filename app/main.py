@@ -264,6 +264,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Rust 性能优化模块初始化失败（将使用 Python 降级）: {e}")
 
+    # 🔥 Phase 4-01: TypeScript 服务层初始化 (v2.0 架构)
+    try:
+        from app.integrations.typescript_bridge import initialize_ts_bridge
+        await initialize_ts_bridge()
+        logger.info("✅ TypeScript 服务层桥接初始化完成 (v2.0)")
+    except Exception as e:
+        logger.warning(f"⚠️ TypeScript 服务层初始化失败（v1.x 模式运行）: {e}")
+
     # 🔥 Phase 3-05: 缓存系统初始化 (cache_manager, cache_warming)
     try:
         from app.core.cache_manager import init_cache_manager
@@ -741,6 +749,14 @@ async def test_log():
     return {"message": "测试成功", "timestamp": time.time()}
 
 # 注册路由
+# 🔥 Phase 4-01: v2.0 API 路由 (TypeScript 服务层)
+try:
+    from app.routers import v2
+    app.include_router(v2.router)
+    print("✅ v2.0 API 路由已注册 (TypeScript 主干架构)")
+except ImportError as e:
+    print(f"⚠️ v2.0 API 路由注册失败: {e}")
+
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])

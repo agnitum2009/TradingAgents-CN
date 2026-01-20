@@ -31,7 +31,7 @@ import type {
   DequeueTaskRequest,
   AckTaskRequest,
   BatchStatusResponse,
-  TaskStatusResponse,
+  BatchTaskStatusResponse,
   QueueStats,
   UserQueueStatus,
   BatchQueueStats,
@@ -174,7 +174,7 @@ export class BatchQueueService {
    * @param taskId - Task ID
    * @returns Result with task status
    */
-  async getTaskStatus(taskId: string): Promise<Result<TaskStatusResponse>> {
+  async getTaskStatus(taskId: string): Promise<Result<BatchTaskStatusResponse>> {
     try {
       const task = await this.repository.getTask(taskId);
 
@@ -182,7 +182,7 @@ export class BatchQueueService {
         return Result.error(new TacnError('TASK_NOT_FOUND', `Task ${taskId} not found`));
       }
 
-      const response: TaskStatusResponse = {
+      const response: BatchTaskStatusResponse = {
         taskId: task.id,
         status: task.status as QueueTaskStatus,
         symbol: task.symbol,

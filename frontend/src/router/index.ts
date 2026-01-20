@@ -70,6 +70,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/daily-analysis',
+    name: 'DailyAnalysis',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '每日分析',
+      icon: 'TrendCharts',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'DailyAnalysisHome',
+        component: () => import('@/views/DailyAnalysis/index.vue'),
+        meta: {
+          title: '每日分析',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/market-ranking',
     name: 'MarketRanking',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -287,6 +309,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/monitoring',
+    name: 'MonitoringDashboard',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '性能监控',
+      icon: 'TrendCharts',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'MonitoringDashboardHome',
+        component: () => import('@/views/MonitoringDashboard.vue'),
+        meta: {
+          title: '性能监控',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/layouts/BasicLayout.vue'),
@@ -402,6 +446,28 @@ const routes: RouteRecordRaw[] = [
       requiresAuth: false, // 关于页面不需要认证
       transition: 'fade'
     }
+  },
+  {
+    path: '/tradingview-demo',
+    name: 'TradingViewDemo',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: 'TradingView 演示',
+      icon: 'TrendCharts',
+      requiresAuth: false,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'TradingViewDemoHome',
+        component: () => import('@/views/TradingViewDemo/index.vue'),
+        meta: {
+          title: 'TradingView 演示',
+          requiresAuth: false
+        }
+      }
+    ]
   },
   {
     path: '/paper',

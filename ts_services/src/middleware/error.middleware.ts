@@ -6,14 +6,34 @@
 
 import { Logger } from '../utils/logger.js';
 import type { ApiError, ResponseMeta, ErrorResponse } from '../dtos/common.dto.js';
-import type { TacnError, ErrorCode } from '../utils/errors.js';
+import type { TacnError } from '../utils/errors.js';
 
 const logger = Logger.for('ErrorMiddleware');
+
+// Error code strings
+type ErrorCodeString =
+  | 'VALIDATION_ERROR'
+  | 'INVALID_INPUT'
+  | 'INVALID_PARAMS'
+  | 'NOT_FOUND'
+  | 'ALREADY_EXISTS'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'INTERNAL_ERROR'
+  | 'DATABASE_ERROR'
+  | 'EXTERNAL_SERVICE_ERROR'
+  | 'TIMEOUT'
+  | 'NOT_IMPLEMENTED'
+  | 'INVALID_STATE'
+  | 'OPERATION_FAILED'
+  | 'RATE_LIMITED'
+  | 'SERVICE_UNAVAILABLE'
+  | 'UNKNOWN_ERROR';
 
 /**
  * HTTP status codes mapping for error codes
  */
-const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
+const ERROR_STATUS_MAP: Record<ErrorCodeString, number> = {
   // General errors (400)
   VALIDATION_ERROR: 400,
   INVALID_INPUT: 400,
@@ -49,8 +69,8 @@ const ERROR_STATUS_MAP: Record<ErrorCode, number> = {
 /**
  * Get HTTP status code for error code
  */
-function getStatusCode(errorCode: ErrorCode): number {
-  return ERROR_STATUS_MAP[errorCode] || 500;
+function getStatusCode(errorCode: string): number {
+  return ERROR_STATUS_MAP[errorCode as ErrorCodeString] || 500;
 }
 
 /**
@@ -122,7 +142,7 @@ export function createErrorResponse(
   meta?: ResponseMeta
 ): ErrorResponse {
   const apiError = toApiError(error);
-  const statusCode = getStatusCode(apiError.code as ErrorCode);
+  const statusCode = getStatusCode(apiError.code as string);
 
   // Log the error
   if (statusCode >= 500) {
@@ -271,8 +291,3 @@ export function requireParam<T>(
   }
   return params[key]!;
 }
-
-/**
- * Re-export for convenience
- */
-export * from '../utils/errors.js';

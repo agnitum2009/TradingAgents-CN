@@ -2,8 +2,8 @@
   {
     "provider": "dashscope",
     "model_name": "qwen-turbo",
-    "api_key": "",
-    "base_url": null,
+    "api_key": "sk-93144cb5ba10451f859ddb5fd58541a9",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "max_tokens": 4000,
     "temperature": 0.7,
     "enabled": true
@@ -11,8 +11,8 @@
   {
     "provider": "dashscope",
     "model_name": "qwen-plus-latest",
-    "api_key": "",
-    "base_url": null,
+    "api_key": "sk-93144cb5ba10451f859ddb5fd58541a9",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "max_tokens": 8000,
     "temperature": 0.7,
     "enabled": true
@@ -48,10 +48,10 @@
     "provider": "deepseek",
     "model_name": "deepseek-chat",
     "api_key": "",
-    "base_url": "",
+    "base_url": "https://api.deepseek.com",
     "max_tokens": 4000,
     "temperature": 0.7,
-    "enabled": true
+    "enabled": false
   },
   {
     "provider": "zhipu",
@@ -70,5 +70,23 @@
     "max_tokens": 4000,
     "temperature": 0.7,
     "enabled": false
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen-long-latest",
+    "api_key": "sk-93144cb5ba10451f859ddb5fd58541a9",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "max_tokens": 4000,
+    "temperature": 0.7,
+    "enabled": true
+  },
+  {
+    "provider": "dashscope",
+    "model_name": "qwen3-max",
+    "api_key": "sk-93144cb5ba10451f859ddb5fd58541a9",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "max_tokens": 4000,
+    "temperature": 0.7,
+    "enabled": true
   }
 ]

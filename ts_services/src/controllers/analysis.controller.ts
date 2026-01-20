@@ -9,6 +9,7 @@ import { Logger } from '../utils/logger.js';
 import { BaseRouter, type RouterConfig } from '../routes/index.js';
 import { createSuccessResponse, handleRouteError } from '../middleware/index.js';
 import { getPythonApiClient, type PythonApiError } from '../integration/python-api-client.js';
+import { broadcastAnalysisProgress } from '../websocket/index.js';
 import type {
   // Request types
   SubmitSingleAnalysisRequest,
@@ -20,7 +21,7 @@ import type {
   AnalysisSummaryResponse,
   CancelTaskResponse,
 } from '../dtos/analysis.dto.js';
-import type { AnalysisTask, AnalysisBatch } from '../types/analysis.js';
+import type { AnalysisTask, AnalysisBatch, TaskStatus, BatchStatus } from '../types/analysis.js';
 
 const logger = Logger.for('AnalysisController');
 
@@ -146,6 +147,9 @@ export class AnalysisController extends BaseRouter {
 
       logger.info(`Analysis task created: ${result.taskId} for ${resolvedSymbol}`);
 
+      // Broadcast progress via WebSocket
+      await this.broadcastProgress(result.taskId, resolvedSymbol, result.status, result);
+
       return createSuccessResponse(result);
     } catch (error) {
       return handleRouteError(error, input.context.requestId);
@@ -178,8 +182,8 @@ export class AnalysisController extends BaseRouter {
       const result: TaskStatusResponse = {
         taskId: response.data.task_id || taskId,
         userId: input.context.user?.userId,
-        symbol: response.data.symbol,
-        status: response.data.status as any,
+        symbol: undefined, // Python API doesn't return symbol in status
+        status: response.data.status as TaskStatus,
         progress: response.data.progress || 0,
         currentStep: response.data.current_step,
         message: response.data.error,
@@ -190,6 +194,11 @@ export class AnalysisController extends BaseRouter {
         startTime: undefined,
         lastUpdate: Date.now(),
       };
+
+      // Broadcast progress via WebSocket (only if symbol is known)
+      if (result.symbol) {
+        await this.broadcastProgress(result.taskId, result.symbol, result.status, result);
+      }
 
       return createSuccessResponse(result);
     } catch (error) {
@@ -345,21 +354,36 @@ export class AnalysisController extends BaseRouter {
 
       const result: BatchTaskStatusResponse = {
         batchId: data.batch_id,
-        status: data.status as any,
+        status: data.status as TaskStatus, // BatchStatus and TaskStatus have compatible values
         total: data.total_tasks,
         completed: data.completed_tasks,
         failed: data.failed_tasks || 0,
-        tasks: (data.tasks || []).map(t => ({
+        tasks: (data.tasks || []).map((t: any) => ({
           taskId: t.task_id,
           symbol: t.symbol,
-          status: t.status,
+          status: t.status as TaskStatus,
           progress: t.progress,
+          elapsedTime: t.elapsed_time || 0,
+          remainingTime: t.estimated_total_time ?
+            Math.max(0, t.estimated_total_time - (t.elapsed_time || 0)) : 0,
+          estimatedTotalTime: t.estimated_total_time || 0,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         })),
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
+
+      // Broadcast progress for each task via WebSocket
+      for (const task of result.tasks) {
+        if (task.symbol) {
+          await this.broadcastProgress(task.taskId, task.symbol, task.status, {
+            progress: task.progress,
+            currentStep: undefined,
+            message: undefined,
+          });
+        }
+      }
 
       return createSuccessResponse(result);
     } catch (error) {
@@ -563,5 +587,29 @@ export class AnalysisController extends BaseRouter {
       return 'down';
     }
     return 'sideways';
+  }
+
+  /**
+   * Broadcast analysis progress via WebSocket
+   */
+  private async broadcastProgress(
+    taskId: string,
+    symbol: string,
+    status: TaskStatus,
+    data: Partial<TaskStatusResponse>
+  ): Promise<void> {
+    try {
+      await broadcastAnalysisProgress(taskId, {
+        taskId,
+        symbol,
+        status: status as any,
+        progress: data.progress || 0,
+        currentStep: data.currentStep,
+        message: data.message,
+      });
+    } catch (error) {
+      // Don't fail the request if WebSocket broadcast fails
+      logger.debug(`Failed to broadcast progress for task ${taskId}:`, error);
+    }
   }
 }

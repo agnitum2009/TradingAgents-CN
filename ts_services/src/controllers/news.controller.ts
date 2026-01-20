@@ -105,7 +105,7 @@ export class NewsController extends BaseRouter {
       const concepts = await repo.getTrendingKeywords(hoursBack, topN);
 
       return createSuccessResponse({
-        concepts: concepts.map(c => ({ keyword: c.word, count: c.count })),
+        concepts: concepts.map(c => ({ keyword: c.word, count: c.frequency })),
         total: concepts.length,
         hoursBack,
       });
@@ -179,7 +179,7 @@ export class NewsController extends BaseRouter {
       const words = await repo.getWordcloudData(hoursBack, topN);
 
       return createSuccessResponse({
-        words: words.map(w => ({ text: w.word, weight: w.count })),
+        words: words.map(w => ({ text: w.word, weight: w.frequency })),
         total: words.length,
         hoursBack,
       });

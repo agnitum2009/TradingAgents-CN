@@ -1,29 +1,25 @@
-# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v1.0.3)
+# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v2.0.0)
 # 前后端分离架构 - 前端服务
 
-# 构建阶段：使用Node.js 22.x（与项目开发环境一致）
+# 构建阶段
 FROM node:22-alpine AS build
 
-ENV NODE_ENV=production
-WORKDIR /app/frontend
+WORKDIR /app
 
-# 复制package.json和package-lock.json
-COPY frontend/package.json frontend/package-lock.json  ./
+# 复制 package.json 文件
+COPY frontend/package.json frontend/package-lock.json* ./frontend/
 
-# 安装依赖（使用npm）
-RUN npm ci --production=false --registry=https://registry.npmmirror.com
+# 安装所有依赖（包括 devDependencies，需要 vite）
+RUN --mount=type=cache,target=/root/.npm npm ci --prefix frontend
 
 # 复制前端源代码
-COPY frontend/. ./
+COPY frontend/ ./frontend/
 
-# 复制根目录的静态资源与文档到构建环境
-# - assets: 提供 /assets/* 静态资源（前端使用绝对路径）
-# - docs: 提供 Article.vue 中通过 ?raw 引用的 Markdown 文档
-COPY assets /app/frontend/public/assets
-COPY docs /app/docs
+# 复制 docs 目录（前端代码引用了 docs 中的文件）
+COPY docs/ ./docs/
 
-# 构建生产版本（跳过类型检查）
-RUN npm run build
+# 使用 npx 确保 vite 可找到
+RUN cd frontend && npx vite build
 
 # 运行阶段：使用Nginx提供静态文件服务
 FROM nginx:alpine AS runtime

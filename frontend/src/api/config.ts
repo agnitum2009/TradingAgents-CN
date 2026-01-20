@@ -1,8 +1,9 @@
 /**
- * 配置管理API
+ * 配置管理API (v2 Only)
  */
 
 import { ApiClient } from './request'
+import { configApi as configApiV2 } from '@/utils/api'
 
 // 配置相关类型定义
 
@@ -160,8 +161,23 @@ export interface SettingMeta {
 // 配置管理API
 export const configApi = {
   // 获取系统配置
-  getSystemConfig(): Promise<SystemConfig> {
-    return ApiClient.get('/api/config/system')
+  async getSystemConfig(): Promise<SystemConfig> {
+    const response = await configApiV2.getSystemConfig()
+    // Map v2 response to SystemConfig format
+    return {
+      config_name: response.data.data.config.configName || 'default',
+      config_type: 'system',
+      llm_configs: response.data.data.config.llmConfigs || [],
+      default_llm: response.data.data.config.defaultLlm,
+      data_source_configs: response.data.data.config.dataSourceConfigs || [],
+      default_data_source: response.data.data.config.defaultDataSource,
+      database_configs: response.data.data.config.databaseConfigs || [],
+      system_settings: response.data.data.config.systemSettings || {},
+      created_at: new Date().toISOString(),
+      updated_at: response.data.data.lastModified || new Date().toISOString(),
+      version: response.data.data.version,
+      is_active: true
+    }
   },
 
   // ========== 大模型厂家管理 ==========
@@ -294,18 +310,47 @@ export const configApi = {
   // ========== 大模型配置管理 ==========
 
   // 获取所有大模型配置
-  getLLMConfigs(): Promise<LLMConfig[]> {
-    return ApiClient.get('/api/config/llm')
+  async getLLMConfigs(): Promise<LLMConfig[]> {
+    const response = await configApiV2.listLLMConfigs()
+    // Map v2 response to LLMConfig format
+    return (response.data.data.items || []).map((item: any) => ({
+      provider: item.provider,
+      model_name: item.modelName,
+      model_display_name: item.modelDisplayName,
+      api_key: item.apiKey,
+      api_base: item.apiBase,
+      max_tokens: item.maxTokens,
+      temperature: item.temperature,
+      timeout: item.timeout,
+      retry_times: item.retryTimes,
+      enabled: item.enabled,
+      description: item.description,
+      input_price_per_1k: item.inputPricePer1k,
+      output_price_per_1k: item.outputPricePer1k,
+      currency: item.currency,
+      enable_memory: item.enableMemory,
+      enable_debug: item.enableDebug,
+      priority: item.priority,
+      model_category: item.modelCategory,
+      capability_level: item.capabilityLevel,
+      suitable_roles: item.suitableRoles,
+      features: item.features,
+      recommended_depths: item.recommendedDepths,
+      performance_metrics: item.performanceMetrics
+    }))
   },
 
   // 添加或更新大模型配置
-  updateLLMConfig(config: Partial<LLMConfig>): Promise<{ message: string; model_name: string }> {
-    return ApiClient.post('/api/config/llm', config)
+  async updateLLMConfig(config: Partial<LLMConfig>): Promise<{ message: string; model_name: string }> {
+    const response = await configApiV2.addLLMConfig(config)
+    return { message: 'Config updated', model_name: config.model_name || '' }
   },
 
   // 删除大模型配置
-  deleteLLMConfig(provider: string, modelName: string): Promise<{ message: string }> {
-    return ApiClient.delete(`/api/config/llm/${provider}/${modelName}`)
+  async deleteLLMConfig(provider: string, modelName: string): Promise<{ message: string }> {
+    const id = `${provider}/${modelName}`
+    await configApiV2.deleteLLMConfig(id)
+    return { message: 'Config deleted' }
   },
 
   // 设置默认大模型
@@ -314,13 +359,33 @@ export const configApi = {
   },
 
   // 获取所有数据源配置
-  getDataSourceConfigs(): Promise<DataSourceConfig[]> {
-    return ApiClient.get('/api/config/datasource')
+  async getDataSourceConfigs(): Promise<DataSourceConfig[]> {
+    const response = await configApiV2.listDataSourceConfigs()
+    // Map v2 response to DataSourceConfig format
+    return (response.data.data.items || []).map((item: any) => ({
+      name: item.name,
+      type: item.type,
+      api_key: item.apiKey,
+      api_secret: item.apiSecret,
+      endpoint: item.endpoint,
+      timeout: item.timeout,
+      rate_limit: item.rateLimit,
+      enabled: item.enabled,
+      priority: item.priority,
+      config_params: item.configParams || {},
+      description: item.description,
+      market_categories: item.marketCategories,
+      display_name: item.displayName,
+      provider: item.provider,
+      created_at: item.createdAt,
+      updated_at: item.updatedAt
+    }))
   },
 
   // 添加数据源配置
-  addDataSourceConfig(config: Partial<DataSourceConfig>): Promise<{ message: string; name: string }> {
-    return ApiClient.post('/api/config/datasource', config)
+  async addDataSourceConfig(config: Partial<DataSourceConfig>): Promise<{ message: string; name: string }> {
+    await configApiV2.addDataSourceConfig(config)
+    return { message: 'Config added', name: config.name || '' }
   },
 
   // 设置默认数据源
@@ -329,18 +394,33 @@ export const configApi = {
   },
 
   // 更新数据源配置
-  updateDataSourceConfig(name: string, config: Partial<DataSourceConfig>): Promise<{ message: string }> {
-    return ApiClient.put(`/api/config/datasource/${name}`, config)
+  async updateDataSourceConfig(name: string, config: Partial<DataSourceConfig>): Promise<{ message: string }> {
+    await configApiV2.updateDataSourceConfig(name, config)
+    return { message: 'Config updated' }
   },
 
   // 删除数据源配置
-  deleteDataSourceConfig(name: string): Promise<{ message: string }> {
-    return ApiClient.delete(`/api/config/datasource/${name}`)
+  async deleteDataSourceConfig(name: string): Promise<{ message: string }> {
+    await configApiV2.deleteDataSourceConfig(name)
+    return { message: 'Config deleted' }
   },
 
   // 市场分类管理
-  getMarketCategories(): Promise<MarketCategory[]> {
-    return ApiClient.get('/api/config/market-categories')
+  async getMarketCategories(): Promise<MarketCategory[]> {
+    const response = await configApiV2.getMarketCategories?.()
+    if (response?.data?.data?.categories) {
+      return response.data.data.categories.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        display_name: item.displayName,
+        description: item.description,
+        enabled: item.enabled,
+        sort_order: item.sortOrder,
+        created_at: item.createdAt,
+        updated_at: item.updatedAt
+      }))
+    }
+    throw new Error('Invalid response')
   },
 
   addMarketCategory(category: Partial<MarketCategory>): Promise<{ message: string; id: string }> {

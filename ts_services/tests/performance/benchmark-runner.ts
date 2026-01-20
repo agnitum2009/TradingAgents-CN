@@ -56,8 +56,8 @@ export class BenchmarkRunner {
 
     // Calculate statistics
     const avgTime = this.mean(times);
-    const minTime = Math.min(...times);
-    const maxTime = Math.max(...times);
+    const minTime = this.arrayMin(times);
+    const maxTime = this.arrayMax(times);
     const stdDev = this.standardDeviation(times, avgTime);
     const ops = 1000 / avgTime;
 
@@ -178,6 +178,30 @@ export class BenchmarkRunner {
    */
   private mean(values: number[]): number {
     return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  /**
+   * Find minimum value in array (avoids stack overflow from spread operator)
+   */
+  private arrayMin(values: number[]): number {
+    if (values.length === 0) return 0;
+    let min = values[0];
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] < min) min = values[i];
+    }
+    return min;
+  }
+
+  /**
+   * Find maximum value in array (avoids stack overflow from spread operator)
+   */
+  private arrayMax(values: number[]): number {
+    if (values.length === 0) return 0;
+    let max = values[0];
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] > max) max = values[i];
+    }
+    return max;
   }
 
   /**

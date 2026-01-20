@@ -134,6 +134,12 @@ export const useAuthStore = defineStore('auth', {
       // 设置API请求头
       this.setAuthHeader(token)
 
+      // 初始化WebSocket连接
+      import('./websocket').then(({ useWebSocketStore }) => {
+        const wsStore = useWebSocketStore()
+        wsStore.setAuthToken(token)
+      })
+
       console.log('✅ 认证信息已保存:', {
         token: token ? '已设置' : '未设置',
         refreshToken: refreshToken ? '已设置' : '未设置',
@@ -158,6 +164,12 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('auth-token')
       localStorage.removeItem('refresh-token')
       localStorage.removeItem('user-info')
+
+      // 清除WebSocket连接
+      import('./websocket').then(({ useWebSocketStore }) => {
+        const wsStore = useWebSocketStore()
+        wsStore.clear()
+      })
     },
 
     // 跳转到登录页

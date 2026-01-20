@@ -22,6 +22,8 @@ export {
   AuthError,
   ConfigError,
   NetworkError,
+  RateLimitError,
+  ConflictError,
 } from './error-types.js';
 
 // Error codes registry
@@ -36,8 +38,5 @@ export { Result } from './result-type.js';
 // Retry utility
 export { Retry } from './retry.js';
 
-// Re-export from old errors.ts for backward compatibility during transition
-export {
-  TacnError as TacnErrorOld,
-  Result as ResultOld,
-} from './errors.js';
+// Note: Old errors.ts file was removed during refactoring
+// Re-exports are handled by the new module structure above

@@ -68,9 +68,9 @@ export class RustStrategyAdapter {
     slowPeriod = 26,
     signalPeriod = 9
   ): Promise<{
-    macd: (number | null)[];
-    signal: (number | null)[];
-    histogram: (number | null)[];
+    macd: number[];
+    signal: number[];
+    histogram: number[];
   }> {
     try {
       const result = await this.rustAdapter.callFunction('tacn_strategy', 'calculate_macd', [
@@ -80,10 +80,10 @@ export class RustStrategyAdapter {
         signalPeriod,
       ]);
 
-      return result as {
-        macd: result[0] as (number | null)[],
-        signal: result[1] as (number | null)[],
-        histogram: result[2] as (number | null)[],
+      return {
+        macd: result[0] as number[],
+        signal: result[1] as number[],
+        histogram: result[2] as number[],
       };
     } catch (error) {
       logger.error('Rust calculate_macd failed, falling back to JS', error);
@@ -104,9 +104,9 @@ export class RustStrategyAdapter {
     period = 20,
     stdDev = 2
   ): Promise<{
-    upper: (number | null)[];
-    middle: (number | null)[];
-    lower: (number | null)[];
+    upper: number[];
+    middle: number[];
+    lower: number[];
   }> {
     try {
       const result = await this.rustAdapter.callFunction('tacn_strategy', 'calculate_bollinger_bands', [
@@ -115,10 +115,10 @@ export class RustStrategyAdapter {
         stdDev,
       ]);
 
-      return result as {
-        upper: result[0] as (number | null)[],
-        middle: result[1] as (number | null)[],
-        lower: result[2] as (number | null)[],
+      return {
+        upper: result[0] as number[],
+        middle: result[1] as number[],
+        lower: result[2] as number[],
       };
     } catch (error) {
       logger.error('Rust calculate_bollinger_bands failed, falling back to JS', error);

@@ -5,7 +5,7 @@
  * Supports both Bearer token and cookie-based authentication.
  */
 
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 import { Logger } from '../utils/logger.js';
 import type { RouteMiddleware, RequestContext } from '../routes/router.types.js';
 import { createErrorResponse } from './index.js';
@@ -84,10 +84,14 @@ export function getAuthConfig(): AuthConfig {
  * Generate JWT token for a user
  */
 export function generateToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-  const token = jwt.sign(payload, authConfig.secret, {
-    expiresIn: authConfig.expiresIn,
-    issuer: authConfig.issuer,
-  });
+  const token = jwt.sign(
+    payload,
+    authConfig.secret,
+    {
+      expiresIn: authConfig.expiresIn,
+      issuer: authConfig.issuer,
+    } as jwt.SignOptions
+  );
 
   logger.debug(`Token generated for user: ${payload.sub}`);
   return token;
@@ -98,7 +102,7 @@ export function generateToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string 
  */
 export function verifyToken(token: string): JwtPayload | null {
   try {
-    const decoded = jwt.verify(token, authConfig.secret, {
+    const decoded = jwt.verify(token, authConfig.secret as string, {
       issuer: authConfig.issuer,
     }) as JwtPayload;
 

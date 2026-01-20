@@ -306,8 +306,6 @@ export interface DataSourceConfig extends Entity {
  * Market category configuration
  */
 export interface MarketCategory extends Entity {
-  /** Category ID */
-  id: string;
   /** Category name */
   name: string;
   /** Display name */
