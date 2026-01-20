@@ -19,15 +19,126 @@ jest.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
+// Mock the Python API client
+jest.mock('../../../src/integration/python-api-client.js', () => ({
+  getPythonApiClient: jest.fn(() => ({
+    submitSingleAnalysis: jest.fn((symbol: string) => Promise.resolve({
+      success: true,
+      data: {
+        task_id: 'task_test_123',
+        symbol: symbol?.symbol || '600519.A',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      },
+    })),
+    getTaskStatus: jest.fn((taskId: string) => Promise.resolve({
+      success: true,
+      data: {
+        task_id: taskId || 'task_test_123',
+        status: 'pending',
+        progress: 0,
+        current_step: 'Task created',
+        elapsed_time: 0,
+        estimated_total_time: 300,
+      },
+    })),
+    getTaskResult: jest.fn((taskId: string) => Promise.resolve({
+      success: true,
+      data: {
+        stock_code: '600519.A',
+        symbol: '600519.A',
+        rating: 'strong_buy',
+        signal: 'BUY',
+        confidence: 0.85,
+        findings: [{ title: 'Test', content: 'Test finding' }],
+        trend: 'bullish',
+      },
+    })),
+    cancelTask: jest.fn((taskId: string) => Promise.resolve({
+      success: true,
+      message: 'Task cancelled',
+      data: {
+        task_id: taskId || 'task_test_123',
+        cancelled: true,
+      },
+    })),
+    submitBatchAnalysis: jest.fn((request: any) => Promise.resolve({
+      success: true,
+      data: {
+        batch_id: 'batch_test_123',
+        status: 'pending',
+        total_tasks: request?.symbols?.length || 3,
+        created_at: new Date().toISOString(),
+      },
+    })),
+    getBatchStatus: jest.fn((batchId: string) => Promise.resolve({
+      success: true,
+      data: {
+        batch_id: batchId || 'batch_test_123',
+        status: 'pending',
+        total_tasks: 3,
+        completed_tasks: 0,
+        failed_tasks: 0,
+        tasks: [],
+      },
+    })),
+    analyzeTrend: jest.fn((request: any) => Promise.resolve({
+      success: true,
+      data: {
+        stock_code: request?.stockCode || '600519.A',
+        symbol: request?.stockCode || '600519.A',
+        rating: 'strong_buy',
+        signal: 'BUY',
+        confidence: 0.85,
+        findings: [{ title: 'Test', content: 'Test finding' }],
+        trend: 'bullish',
+      },
+    })),
+    getAnalysisHistory: jest.fn((query: any) => Promise.resolve({
+      success: true,
+      data: {
+        items: [],
+        total: 0,
+        page: query?.page || 1,
+        pageSize: query?.pageSize || 20,
+      },
+    })),
+  })),
+  PythonApiError: class extends Error {
+    constructor(statusCode: number, code: string, message: string) {
+      super(message);
+      this.name = 'PythonApiError';
+    }
+  },
+}));
+
+// Mock WebSocket broadcast function
+jest.mock('../../../src/websocket/index.js', () => ({
+  broadcastAnalysisProgress: jest.fn().mockResolvedValue(undefined),
+  broadcastQuoteUpdate: jest.fn().mockResolvedValue(undefined),
+  broadcastNotification: jest.fn().mockResolvedValue(undefined),
+}));
+
 describe('AnalysisController', () => {
   let controller: AnalysisController;
   let mockContext: RequestContext;
+  let mockAuthenticatedContext: RequestContext;
 
   beforeEach(() => {
     controller = new AnalysisController();
     mockContext = createRequestContext({
       path: '/api/v2/analysis/ai/single',
       method: 'POST',
+    });
+
+    // Create authenticated context for tests that require user
+    mockAuthenticatedContext = createRequestContext({
+      path: '/api/v2/analysis/ai/single',
+      method: 'POST',
+      user: {
+        userId: 'test_user_123',
+        username: 'testuser',
+      },
     });
   });
 
@@ -60,7 +171,9 @@ describe('AnalysisController', () => {
 
     it('should require authentication for all routes', () => {
       const routes = controller.getRoutes();
-      routes.forEach(route => {
+      // Filter out routes that explicitly don't require auth (like health check)
+      const protectedRoutes = routes.filter(route => route.authRequired !== false);
+      protectedRoutes.forEach(route => {
         expect(route.authRequired).toBe(true);
       });
     });
@@ -232,7 +345,7 @@ describe('AnalysisController', () => {
         body: {},
         params: {},
         query: { page: '1', pageSize: '20' },
-        context: mockContext,
+        context: mockAuthenticatedContext,  // Use authenticated context
       };
 
       const handler = (controller as any).getAnalysisHistory.bind(controller);

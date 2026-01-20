@@ -19,6 +19,34 @@ jest.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
+// Mock the news repository
+jest.mock('../../../src/repositories/news/index.js', () => {
+  const mockRepo = {
+    getMarketNews: jest.fn().mockResolvedValue([]),
+    getLatestNews: jest.fn().mockResolvedValue([]),
+    getTrendingKeywords: jest.fn().mockResolvedValue([
+      { word: 'AI', frequency: 100 },
+      { word: '芯片', frequency: 85 },
+    ]),
+    getHotStocks: jest.fn().mockResolvedValue([
+      { code: '600519.A', count: 10 },
+      { code: '000001.A', count: 8 },
+    ]),
+    getNewsAnalytics: jest.fn().mockResolvedValue({
+      totalNews: 100,
+      avgSentiment: 0.5,
+    }),
+    getWordcloudData: jest.fn().mockResolvedValue([
+      { word: 'AI', frequency: 100 },
+      { word: '科技', frequency: 90 },
+    ]),
+    saveMarketNews: jest.fn().mockResolvedValue(5),
+  };
+  return {
+    getNewsRepository: jest.fn(() => mockRepo),
+  };
+});
+
 describe('NewsController', () => {
   let controller: NewsController;
   let mockContext: RequestContext;
@@ -56,7 +84,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: {},
-        query: { page: '1', pageSize: '20', date: '2024-01-19' },
+        query: { limit: '20', hoursBack: '24' },
         context: mockContext,
       };
 
@@ -66,7 +94,7 @@ describe('NewsController', () => {
       expect(result.success).toBe(true);
       expect(result.data.items).toBeDefined();
       expect(result.data.total).toBeDefined();
-      expect(result.data.date).toBeDefined();
+      expect(result.data.category).toBeDefined();
     });
   });
 
@@ -76,7 +104,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: { code: stockCode },
-        query: {},
+        query: { limit: '20', hoursBack: '24' },
         context: mockContext,
       };
 
@@ -92,7 +120,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: { code: '600519.A' },
-        query: { page: '1', pageSize: '10' },
+        query: { limit: '10', hoursBack: '24' },
         context: mockContext,
       };
 
@@ -108,7 +136,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: {},
-        query: { limit: '20', date: '2024-01-19' },
+        query: { hoursBack: '24', topN: '20' },
         context: mockContext,
       };
 
@@ -118,7 +146,7 @@ describe('NewsController', () => {
       expect(result.success).toBe(true);
       expect(result.data.concepts).toBeDefined();
       expect(result.data.total).toBeDefined();
-      expect(result.data.date).toBeDefined();
+      expect(result.data.hoursBack).toBeDefined();
     });
   });
 
@@ -127,7 +155,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: {},
-        query: { limit: '20', date: '2024-01-19' },
+        query: { hoursBack: '24', topN: '10' },
         context: mockContext,
       };
 
@@ -163,7 +191,7 @@ describe('NewsController', () => {
       const input = {
         body: {},
         params: {},
-        query: { date: '2024-01-19' },
+        query: { hoursBack: '24', topN: '50' },
         context: mockContext,
       };
 
@@ -171,7 +199,8 @@ describe('NewsController', () => {
       const result = await handler(input);
 
       expect(result.success).toBe(true);
-      expect(result.data).toBeDefined();
+      expect(result.data.words).toBeDefined();
+      expect(result.data.total).toBeDefined();
     });
   });
 

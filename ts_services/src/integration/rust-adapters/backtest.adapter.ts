@@ -7,13 +7,16 @@
 
 import { RustAdapter } from '../rust-adapter.js';
 import type {
-  BacktestOrder,
+  BacktestTrade,
   BacktestResult,
-  KlineData,
 } from '../../types/index.js';
+import type { Kline } from '../../types/index.js';
 import { Logger } from '../../utils/logger.js';
 
 const logger = Logger.for('RustBacktestAdapter');
+
+// KlineData type as array format for Rust
+type KlineData = [number, number, number, number, number, number];
 
 /**
  * Rust Backtest Adapter
@@ -39,99 +42,7 @@ export class RustBacktestAdapter {
    * @returns Backtest result
    */
   async runBacktest(
-    klines: KlineData[],
-    options: {
-      initialCapital?: number;
-      commissionRate?: number;
-      strategy?: 'sma_cross' | 'momentum' | 'mean_reversion';
-      strategyParams?: Record<string, number>;
-    } = {}
-  ): Promise<BacktestResult> {
-    const {
-      initialCapital = 100000,
-      commissionRate = 0.001,
-      strategy = 'sma_cross',
-      strategyParams = {},
-    } = options;
-
-    try {
-      // Convert klines to tuple format
-      const klineTuples = klines.map(k => [
-        k.timestamp,
-        k.open,
-        k.high,
-        k.low,
-        k.close,
-        k.volume,
-      ]);
-
-      const params = JSON.stringify(strategyParams);
-
-      const result = await this.rustAdapter.callFunction('tacn_backtest', 'simple_backtest', [
-        klineTuples,
-        initialCapital,
-        commissionRate,
-        strategy,
-        params,
-      ]);
-
-      logger.info(`Rust backtest completed: ${strategy} strategy`);
-      return result as BacktestResult;
-    } catch (error) {
-      logger.error('Rust backtest failed, falling back to JS', error);
-      return this.runBacktestJS(klines, options);
-    }
-  }
-
-  /**
-   * Run parallel backtests for multiple strategies
-   *
-   * @param klines - Kline data
-   * @param strategies - Strategy configurations
-   * @returns Backtest results for all strategies
-   */
-  async runParallelBacktests(
-    klines: KlineData[],
-    strategies: Array<{
-      name: string;
-      type: 'sma_cross' | 'momentum';
-      params: Record<string, number>;
-    }>
-  ): Promise<Array<{ name: string; result: BacktestResult }>> {
-    logger.info(`Running ${strategies.length} parallel backtests using Rust...`);
-
-    const klineTuples = klines.map(k => [
-      k.timestamp,
-      k.open,
-      k.high,
-      k.low,
-      k.close,
-      k.volume,
-    ]);
-
-    const results: Array<{ name: string; result: BacktestResult }> = [];
-
-    for (const strategyConfig of strategies) {
-      const result = await this.runBacktest(klines, {
-        strategy: strategyConfig.type,
-        strategyParams: strategyConfig.params,
-      });
-
-      results.push({
-        name: strategyConfig.name,
-        result,
-      });
-    }
-
-    return results;
-  }
-
-  // ========================================================================
-  // Fallback Implementation (JavaScript)
-  // ========================================================================
-
-  private async runBacktestJS(
-    klines: KlineData[],
+    klines: Kline[],
     options: {
       initialCapital?: number;
       commissionRate?: number;
@@ -146,91 +57,152 @@ export class RustBacktestAdapter {
       strategyParams = {},
     } = options;
 
-    // Simple SMA crossover backtest in JavaScript
-    const shortPeriod = (strategyParams.short_period || 5) as number;
-    const longPeriod = (strategyParams.long_period || 20) as number;
+    // Check if Python adapter is available before attempting to use it
+    const pythonAdapter = (this.rustAdapter as any).pythonAdapter;
+    const pythonReady = pythonAdapter && pythonAdapter.ready;
 
-    let capital = initialCapital;
-    let position = 0;
-    let trades = 0;
-    let winningTrades = 0;
-    const capitalHistory: number[] = [capital];
+    if (pythonReady) {
+      try {
+        // Convert klines to tuple format
+        const klineTuples: KlineData[] = klines.map(k => [
+          k.timestamp,
+          k.open,
+          k.high,
+          k.low,
+          k.close,
+          k.volume,
+        ]);
 
-    // Calculate SMAs
-    const shortSMA = this.calculateSMA(klines.map(k => k.close), shortPeriod);
-    const longSMA = this.calculateSMA(klines.map(k => k.close), longPeriod);
+        const params = JSON.stringify(strategyParams);
 
-    // Run strategy
-    for (let i = longPeriod; i < klines.length; i++) {
-      const short = shortSMA[i];
-      const long = longSMA[i];
+        // Use Python adapter to call Rust module
+        const result = await pythonAdapter.call<BacktestResult>(
+          'rust_backtest_simple',
+          klineTuples,
+          initialCapital,
+          commissionRate,
+          strategy,
+          params,
+        );
 
-      if (short === null || long === null) continue;
-
-      // Golden cross - buy
-      if (short > long && position <= 0) {
-        const price = klines[i].close;
-        const quantity = Math.floor(capital * 0.95 / price);
-        const cost = price * quantity * (1 + commissionRate);
-
-        if (cost <= capital) {
-          capital -= cost;
-          position = quantity;
-          trades++;
-        }
-      }
-      // Death cross - sell
-      else if (short < long && position > 0) {
-        const price = klines[i].close;
-        const revenue = price * position * (1 - commissionRate);
-
-        capital += revenue;
-        if (revenue > capital * 0.95 / price * price * (1 + commissionRate)) {
-          winningTrades++;
-        }
-
-        position = 0;
-        capitalHistory.push(capital);
+        logger.info(`Rust backtest completed: ${strategy} strategy`);
+        return result;
+      } catch (error) {
+        logger.debug('Rust backtest failed, falling back to JS', error);
+        return this.runBacktestJS(klines, options);
       }
     }
 
-    // Calculate metrics
-    const finalCapital = capital + position * klines[klines.length - 1].close;
-    const totalReturn = ((finalCapital / initialCapital) - 1) * 100;
-
-    // Calculate max drawdown
-    let maxCapital = initialCapital;
-    let maxDrawdown = 0;
-    for (const c of capitalHistory) {
-      if (c > maxCapital) maxCapital = c;
-      const drawdown = ((maxCapital - c) / maxCapital) * 100;
-      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-    }
-
-    return {
-      totalTrades: trades,
-      winningTrades,
-      losingTrades: trades - winningTrades,
-      totalReturn,
-      maxDrawdown,
-      sharpeRatio: 0, // Simplified
-      winRate: trades > 0 ? (winningTrades / trades) * 100 : 0,
-      finalCapital,
-    };
+    // Python adapter not ready, use JS fallback directly
+    logger.debug('Python adapter not available, using JS fallback');
+    return this.runBacktestJS(klines, options);
   }
 
-  private calculateSMA(data: number[], period: number): (number | null)[] {
-    const result: (number | null)[] = [];
+  /**
+   * Run parallel backtests for multiple strategies
+   *
+   * @param klines - Kline data
+   * @param strategies - Strategy configurations
+   * @returns Array of backtest results
+   */
+  async runParallelBacktests(
+    klines: Kline[],
+    strategies: Array<{
+      name: string;
+      strategy: 'sma_cross' | 'momentum';
+      params?: Record<string, number>;
+    }>
+  ): Promise<Array<{ name: string; result: BacktestResult }>> {
+    const results = await Promise.all(
+      strategies.map(async ({ name, strategy, params }) => {
+        const result = await this.runBacktest(klines, {
+          strategy,
+          strategyParams: params,
+        });
+        return { name, result };
+      })
+    );
 
-    for (let i = 0; i < data.length; i++) {
-      if (i < period - 1) {
-        result.push(null);
-      } else {
-        const sum = data.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
-        result.push(sum / period);
+    logger.info(`Parallel backtests completed: ${results.length} strategies`);
+    return results;
+  }
+
+  /**
+   * JavaScript fallback for backtesting
+   */
+  private async runBacktestJS(
+    klines: Kline[],
+    options: {
+      initialCapital?: number;
+      commissionRate?: number;
+      strategy?: 'sma_cross' | 'momentum';
+      strategyParams?: Record<string, number>;
+    } = {}
+  ): Promise<BacktestResult> {
+    const { initialCapital = 100000, commissionRate = 0.001, strategy = 'sma_cross' } = options;
+
+    logger.info(`Running JS fallback backtest: ${strategy}`);
+
+    const trades: BacktestTrade[] = [];
+    let capital = initialCapital;
+    let position = 0;
+    let lastSignal = 'none';
+
+    // Simple SMA crossover strategy
+    for (let i = 20; i < klines.length; i++) {
+      const slice = klines.slice(i - 20, i);
+      const sma = slice.reduce((sum, k) => sum + k.close, 0) / 20;
+
+      if (klines[i].close > sma && lastSignal !== 'buy') {
+        // Buy signal
+        const price = klines[i].close;
+        const amount = Math.floor(capital / price);
+        if (amount > 0) {
+          position = amount;
+          capital -= amount * price * (1 + commissionRate);
+          lastSignal = 'buy';
+          trades.push({
+            timestamp: klines[i].timestamp,
+            type: 'buy',
+            price,
+            amount,
+          });
+        }
+      } else if (klines[i].close < sma && lastSignal !== 'sell') {
+        // Sell signal
+        if (position > 0) {
+          const price = klines[i].close;
+          capital += position * price * (1 - commissionRate);
+          trades.push({
+            timestamp: klines[i].timestamp,
+            type: 'sell',
+            price,
+            amount: position,
+          });
+          position = 0;
+          lastSignal = 'sell';
+        }
       }
     }
 
-    return result;
+    // Close final position
+    if (position > 0) {
+      const lastPrice = klines[klines.length - 1].close;
+      capital += position * lastPrice * (1 - commissionRate);
+    }
+
+    const totalReturn = ((capital - initialCapital) / initialCapital) * 100;
+
+    return {
+      totalReturn,
+      totalTrades: trades.length,
+      finalCapital: capital,
+      trades,
+      metrics: {
+        sharpeRatio: 0,
+        maxDrawdown: 0,
+        winRate: 0,
+      },
+    };
   }
 }

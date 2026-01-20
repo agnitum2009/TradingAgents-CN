@@ -19,6 +19,108 @@ jest.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
+// Mock the config service
+jest.mock('../../../src/domain/config/config.service.js', () => {
+  const mockService = {
+    getSystemConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        version: 1,
+        updatedAt: new Date().toISOString(),
+        maxConcurrentTasks: 5,
+      },
+    }),
+    updateSystemConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        config: { maxConcurrentTasks: 10 },
+        version: 2,
+      },
+    }),
+    addLLMConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        id: 'llm_test_123',
+        provider: 'test',
+        modelName: 'test-model',
+      },
+    }),
+    updateLLMConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        id: 'llm_123',
+        provider: 'test',
+        modelName: 'test-model',
+      },
+    }),
+    deleteLLMConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: { deleted: true },
+    }),
+    getLLMConfigs: jest.fn().mockResolvedValue({
+      success: true,
+      data: [],
+    }),
+    getBestLLMConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        provider: 'openai',
+        modelName: 'gpt-4',
+        capabilityLevel: 5,
+        priority: 1,
+      },
+    }),
+    addDataSourceConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        id: 'ds_test_123',
+        name: 'Test Datasource',
+        type: 'akshare',
+      },
+    }),
+    updateDataSourceConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        id: 'ds_123',
+        name: 'Test Datasource',
+        type: 'akshare',
+      },
+    }),
+    deleteDataSourceConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: { deleted: true },
+    }),
+    getDataSourceConfigs: jest.fn().mockResolvedValue({
+      success: true,
+      data: [],
+    }),
+    testConfig: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        success: true,
+        responseTime: 150,
+        message: 'Config test passed',
+      },
+    }),
+    getUsageStats: jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        totalInputTokens: 1000,
+        totalOutputTokens: 500,
+        totalRequests: 10,
+        costByCurrency: { CNY: 0.5 },
+      },
+    }),
+    getMarketCategories: jest.fn().mockResolvedValue({
+      success: true,
+      data: [],
+    }),
+  };
+  return {
+    getConfigService: jest.fn(() => mockService),
+  };
+});
+
 describe('ConfigController', () => {
   let controller: ConfigController;
   let mockContext: RequestContext;
@@ -126,8 +228,8 @@ describe('ConfigController', () => {
   describe('updateLLMConfig', () => {
     it('should return updated LLM config response', async () => {
       const input = {
-        body: { name: 'Updated Provider' },
-        params: { id: 'llm_123' },
+        body: { updates: { name: 'Updated Provider' } },
+        params: { id: 'openai/gpt-4' },
         query: {},
         context: mockContext,
       };
@@ -143,7 +245,7 @@ describe('ConfigController', () => {
     it('should return delete success response', async () => {
       const input = {
         body: {},
-        params: { id: 'llm_123' },
+        params: { id: 'openai/gpt-4' },
         query: {},
         context: mockContext,
       };
@@ -213,7 +315,7 @@ describe('ConfigController', () => {
   describe('updateDataSourceConfig', () => {
     it('should return updated datasource response', async () => {
       const input = {
-        body: { enabled: false },
+        body: { updates: { enabled: false } },
         params: { id: 'ds_123' },
         query: {},
         context: mockContext,

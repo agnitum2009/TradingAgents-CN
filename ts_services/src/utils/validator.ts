@@ -703,6 +703,66 @@ export const validators = {
   tradingDate: (value: unknown, fieldName?: string) =>
     Validator.validateTradingDate(value, fieldName),
   pagination: (params: unknown) => Validator.validatePagination(params),
+  // Schema validators for SchemaValidator class
+  string: (options: { required?: boolean; minLength?: number; maxLength?: number } = {}) => {
+    return (value: unknown): ValidationResult => {
+      if (options.required && !Validator.isNonEmptyString(value)) {
+        return { valid: false, error: 'String is required and cannot be empty' };
+      }
+      if (value !== undefined && typeof value === 'string') {
+        if (options.minLength !== undefined && value.length < options.minLength) {
+          return { valid: false, error: `String must be at least ${options.minLength} characters` };
+        }
+        if (options.maxLength !== undefined && value.length > options.maxLength) {
+          return { valid: false, error: `String must be at most ${options.maxLength} characters` };
+        }
+      }
+      return { valid: true, value };
+    };
+  },
+  number: (options: { required?: boolean; min?: number; max?: number } = {}) => {
+    return (value: unknown): ValidationResult => {
+      if (options.required && (value === undefined || typeof value !== 'number' || isNaN(value))) {
+        return { valid: false, error: 'Number is required' };
+      }
+      if (value !== undefined && typeof value === 'number') {
+        if (options.min !== undefined && value < options.min) {
+          return { valid: false, error: `Number must be at least ${options.min}` };
+        }
+        if (options.max !== undefined && value > options.max) {
+          return { valid: false, error: `Number must be at most ${options.max}` };
+        }
+      }
+      return { valid: true, value };
+    };
+  },
+  array: (options: { required?: boolean; minLength?: number; maxLength?: number } = {}) => {
+    return (value: unknown): ValidationResult => {
+      if (options.required && !Array.isArray(value)) {
+        return { valid: false, error: 'Array is required' };
+      }
+      if (value !== undefined && Array.isArray(value)) {
+        if (options.minLength !== undefined && value.length < options.minLength) {
+          return { valid: false, error: `Array must have at least ${options.minLength} items` };
+        }
+        if (options.maxLength !== undefined && value.length > options.maxLength) {
+          return { valid: false, error: `Array must have at most ${options.maxLength} items` };
+        }
+      }
+      return { valid: true, value };
+    };
+  },
+  object: (options: { required?: boolean } = {}) => {
+    return (value: unknown): ValidationResult => {
+      if (options.required && (value === undefined || typeof value !== 'object' || Array.isArray(value) || value === null)) {
+        return { valid: false, error: 'Object is required' };
+      }
+      if (value !== undefined && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        return { valid: true, value };
+      }
+      return { valid: true, value };
+    };
+  },
 };
 
 /**

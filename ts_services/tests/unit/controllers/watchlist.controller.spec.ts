@@ -19,6 +19,48 @@ jest.mock('../../../src/utils/logger.js', () => ({
   },
 }));
 
+// Mock the watchlist repository
+jest.mock('../../../src/repositories/watchlist.repository.js', () => {
+  const mockRepo = {
+    addFavorite: jest.fn().mockResolvedValue({
+      id: 'watch_test_123',
+      stockCode: '600519.A',
+      stockName: '贵州茅台',
+      market: 'A股',
+      notes: 'Test note',
+      tags: [],
+      addedAt: new Date().toISOString(),
+    }),
+    getUserFavoritesWithQuotes: jest.fn().mockResolvedValue([]),
+    getUserFavorites: jest.fn().mockResolvedValue([]),
+    getWatchlistStats: jest.fn().mockResolvedValue({
+      total: 0,
+      withAlerts: 0,
+      lastUpdated: new Date().toISOString(),
+    }),
+    updateFavorite: jest.fn().mockResolvedValue({
+      id: 'watch_123',
+      stockCode: '600519.A',
+      notes: 'Updated notes',
+    }),
+    removeFavorite: jest.fn().mockResolvedValue(true),
+    addMultipleFavorites: jest.fn().mockResolvedValue([
+      { id: 'watch_1', stockCode: '600519.A' },
+      { id: 'watch_2', stockCode: '000001.A' },
+      { id: 'watch_3', stockCode: '300001.B' },
+    ]),
+    setPriceAlert: jest.fn().mockResolvedValue({
+      id: 'alert_test_123',
+      stockCode: '600519.A',
+      alertPriceHigh: 2000,
+    }),
+    getTagStats: jest.fn().mockResolvedValue([]),
+  };
+  return {
+    getWatchlistRepository: jest.fn(() => mockRepo),
+  };
+});
+
 describe('WatchlistController', () => {
   let controller: WatchlistController;
   let mockContext: RequestContext;
@@ -141,7 +183,11 @@ describe('WatchlistController', () => {
     it('should return bulk import response', async () => {
       const input = {
         body: {
-          stockCodes: ['600519.A', '000001.A', '300001.B'],
+          stocks: [
+            { stockCode: '600519.A', stockName: '贵州茅台' },
+            { stockCode: '000001.A', stockName: '平安银行' },
+            { stockCode: '300001.B', stockName: '特锐德' },
+          ],
         },
         params: {},
         query: {},

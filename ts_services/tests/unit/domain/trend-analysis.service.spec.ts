@@ -42,9 +42,16 @@ describe('TrendAnalysisService', () => {
     const dayMs = 24 * 60 * 60 * 1000;
 
     for (let i = 0; i < count; i++) {
-      const change = trend === 'up' ? 1 :
-                    trend === 'down' ? -1 :
-                    (Math.random() - 0.5) * 2;
+      let change: number;
+      if (trend === 'up') {
+        change = 1;
+      } else if (trend === 'down') {
+        change = -1;
+      } else {
+        // For sideways, use deterministic oscillation that creates intertwined MAs
+        const phase = (i / count) * Math.PI * 4; // 2 full cycles
+        change = Math.sin(phase) * 0.5; // Oscillates between -0.5 and 0.5
+      }
       const move = price * volatility * change;
       const open = price;
       const close = price + move;
@@ -140,18 +147,27 @@ describe('TrendAnalysisService', () => {
   function generatePullbackKlines(): Kline[] {
     // Start with bullish trend
     const klines = generateBullishKlines();
-    const last5 = klines.slice(-5);
 
-    // Modify last 5 candles to create a pullback
-    let basePrice = last5[0].close;
-    for (let i = 0; i < 5; i++) {
-      const kline = klines[klines.length - 5 + i];
-      // Small pullback
-      kline.close = basePrice * (0.98 + i * 0.005);
-      kline.high = Math.max(kline.open, kline.close) * 1.005;
-      kline.low = Math.min(kline.open, kline.close) * 0.995;
-      kline.volume = 800000; // Shrink volume
+    // Set consistent high volume for most candles (except last one)
+    // The 5-day average uses indices length-6 to length-2, so set those to high volume
+    const highVol = 2000000;
+    const lowVol = 500000; // This will be 25% of high vol, ratio = 0.25 < 0.7
+
+    for (let i = 0; i < klines.length - 1; i++) {
+      klines[i].volume = highVol;
     }
+
+    // Latest candle (last one) gets low volume
+    const latestIdx = klines.length - 1;
+    klines[latestIdx].volume = lowVol;
+
+    // Also create price pullback: latest close < previous close
+    const prevIdx = klines.length - 2;
+    const prevClose = klines[prevIdx].close;
+    klines[latestIdx].close = prevClose * 0.98; // 2% drop
+    klines[latestIdx].open = prevClose * 0.99; // Open is also lower
+    klines[latestIdx].high = prevClose * 0.995;
+    klines[latestIdx].low = prevClose * 0.97;
 
     return klines;
   }
