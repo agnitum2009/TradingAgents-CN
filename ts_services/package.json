@@ -1,7 +1,6 @@
 {
   "name": "tacn-ts-services",
   "version": "2.0.0",
-  "type": "module",
   "description": "TradingAgents-CN TypeScript Service Layer",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -30,6 +29,8 @@
   "dependencies": {
     "date-fns": "^3.0.0",
     "eventemitter3": "^5.0.1",
+    "mongodb": "^6.21.0",
+    "redis": "^5.10.0",
     "reflect-metadata": "^0.2.2",
     "tslib": "^2.8.1",
     "tsyringe": "^4.8.0",
