@@ -15,6 +15,9 @@ import {
   setAuthConfig,
   getAuthConfig,
 } from '../middleware/auth.middleware.js';
+import { hashPassword as hashPasswordBcrypt, verifyPassword as verifyPasswordBcrypt, validatePasswordStrength } from '../utils/password.js';
+import { getUserRepository, UserRepository } from '../repositories/user.repository.js';
+import { addToBlacklist, isInBlacklist } from '../services/token-blacklist.service.js';
 import type {
   LoginRequest,
   LoginResponse,
@@ -30,49 +33,13 @@ import type {
 const logger = Logger.for('AuthController');
 
 /**
- * Mock user database (replace with real database in production)
- */
-const mockUsers = new Map<string, {
-  id: string;
-  username: string;
-  email: string;
-  passwordHash: string;
-  roles: string[];
-  createdAt: number;
-}>();
-
-/**
- * Initialize mock admin user
- */
-mockUsers.set('admin', {
-  id: 'user_admin',
-  username: 'admin',
-  email: 'admin@tacn.local',
-  passwordHash: 'admin123', // In production, use bcrypt hash
-  roles: ['admin', 'user'],
-  createdAt: Date.now(),
-});
-
-/**
- * Simple password hash (for demo only - use bcrypt in production)
- */
-function hashPassword(password: string): string {
-  return password; // TODO: Replace with bcrypt
-}
-
-/**
- * Verify password (for demo only - use bcrypt in production)
- */
-function verifyPassword(password: string, hash: string): boolean {
-  return password === hash; // TODO: Replace with bcrypt
-}
-
-/**
  * Authentication Controller
  *
  * Handles user authentication, registration, and token management.
  */
 export class AuthController extends BaseRouter {
+  private userRepo: UserRepository;
+
   constructor() {
     const config: RouterConfig = {
       basePath: '/api/v2/auth',
@@ -80,6 +47,7 @@ export class AuthController extends BaseRouter {
       defaultAuthRequired: false, // Auth endpoints are public
     };
     super(config);
+    this.userRepo = getUserRepository();
     this.registerRoutes();
   }
 
@@ -139,19 +107,25 @@ export class AuthController extends BaseRouter {
       }
 
       // Find user by username or email
-      const user = Array.from(mockUsers.values()).find(
-        u => u.username === username || u.email === email
-      );
+      const user = await this.userRepo.findByUsernameOrEmail(username || email || '');
 
       if (!user) {
         logger.warn(`Login failed: User not found (${username || email})`);
         return handleRouteError(new Error('Invalid credentials'), input.context.requestId);
       }
 
-      // Verify password
-      if (!verifyPassword(password, user.passwordHash)) {
+      // Verify password using bcrypt
+      const isValid = await verifyPasswordBcrypt(password, user.passwordHash);
+
+      if (!isValid) {
         logger.warn(`Login failed: Invalid password for user ${user.username}`);
         return handleRouteError(new Error('Invalid credentials'), input.context.requestId);
+      }
+
+      // Check if account is active
+      if (!user.isActive) {
+        logger.warn(`Login failed: Account disabled for user ${user.username}`);
+        return handleRouteError(new Error('Account is disabled'), input.context.requestId);
       }
 
       // Generate token
@@ -160,6 +134,9 @@ export class AuthController extends BaseRouter {
         username: user.username,
         roles: user.roles,
       });
+
+      // Update last login
+      await this.userRepo.updateLastLogin(user.id);
 
       logger.info(`User logged in: ${user.username}`);
 
@@ -193,34 +170,54 @@ export class AuthController extends BaseRouter {
         return handleRouteError(new Error('Username, email, and password are required'), input.context.requestId);
       }
 
-      // Check if user already exists
-      const existingUser = Array.from(mockUsers.values()).find(
-        u => u.username === username || u.email === email
-      );
-
-      if (existingUser) {
-        logger.warn(`Registration failed: User already exists (${username})`);
-        return handleRouteError(new Error('Username or email already exists'), input.context.requestId);
+      // Validate password strength
+      const passwordCheck = validatePasswordStrength(password);
+      if (!passwordCheck.valid) {
+        return handleRouteError(new Error(passwordCheck.error || 'Invalid password'), input.context.requestId);
       }
 
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return handleRouteError(new Error('Invalid email format'), input.context.requestId);
+      }
+
+      // Validate username format (alphanumeric, 3-20 characters)
+      const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
+      if (!usernameRegex.test(username)) {
+        return handleRouteError(new Error('Username must be 3-20 characters (alphanumeric and underscore only)'), input.context.requestId);
+      }
+
+      // Check if user already exists
+      const existingUser = await this.userRepo.findByUsernameOrEmail(username);
+      if (existingUser && existingUser.username === username) {
+        logger.warn(`Registration failed: Username already exists (${username})`);
+        return handleRouteError(new Error('Username already exists'), input.context.requestId);
+      }
+
+      const existingEmail = await this.userRepo.findByUsernameOrEmail(email);
+      if (existingEmail && existingEmail.email === email) {
+        logger.warn(`Registration failed: Email already exists (${email})`);
+        return handleRouteError(new Error('Email already exists'), input.context.requestId);
+      }
+
+      // Hash password using bcrypt
+      const passwordHash = await hashPasswordBcrypt(password);
+
       // Create new user
-      const userId = `user_${Date.now()}`;
-      const newUser = {
-        id: userId,
+      const newUser = await this.userRepo.create({
         username,
         email,
-        passwordHash: hashPassword(password),
+        passwordHash,
         roles: ['user'], // Default role
-        createdAt: Date.now(),
-      };
-
-      mockUsers.set(userId, newUser);
+        isActive: true,
+      });
 
       // Generate token
       const token = generateToken({
-        sub: userId,
-        username,
-        roles: ['user'],
+        sub: newUser.id,
+        username: newUser.username,
+        roles: newUser.roles,
       });
 
       logger.info(`New user registered: ${username}`);
@@ -228,10 +225,10 @@ export class AuthController extends BaseRouter {
       const responseData: RegisterResponse = {
         token,
         user: {
-          id: userId,
-          username,
-          email,
-          roles: ['user'],
+          id: newUser.id,
+          username: newUser.username,
+          email: newUser.email,
+          roles: newUser.roles,
         },
         expiresIn: getAuthConfig().expiresIn,
       };
@@ -252,6 +249,12 @@ export class AuthController extends BaseRouter {
 
       if (!token) {
         return handleRouteError(new Error('Token is required'), input.context.requestId);
+      }
+
+      // Check if token is blacklisted
+      const blacklisted = await isInBlacklist(token);
+      if (blacklisted) {
+        return handleRouteError(new Error('Token has been revoked'), input.context.requestId);
       }
 
       // Refresh token
@@ -290,6 +293,16 @@ export class AuthController extends BaseRouter {
         return handleRouteError(new Error('Token is required'), input.context.requestId);
       }
 
+      // Check if token is blacklisted
+      const blacklisted = await isInBlacklist(token);
+      if (blacklisted) {
+        const responseData: ValidateTokenResponse = {
+          valid: false,
+          error: 'Token has been revoked',
+        };
+        return createSuccessResponse(responseData);
+      }
+
       // Verify token
       const payload = verifyToken(token);
 
@@ -305,12 +318,22 @@ export class AuthController extends BaseRouter {
       const expiration = getTokenExpiration(token);
       const expired = expiration ? expiration < new Date() : false;
 
+      // Get user info
+      const user = await this.userRepo.findById(payload.sub);
+      if (!user || !user.isActive) {
+        const responseData: ValidateTokenResponse = {
+          valid: false,
+          error: 'User not found or inactive',
+        };
+        return createSuccessResponse(responseData);
+      }
+
       const responseData: ValidateTokenResponse = {
         valid: !expired,
         user: payload.sub ? {
           id: payload.sub,
           username: payload.username,
-          roles: payload.roles,
+          roles: user.roles,
         } : undefined,
         expiresAt: expiration?.getTime(),
       };
@@ -345,14 +368,24 @@ export class AuthController extends BaseRouter {
   /**
    * Logout endpoint
    * POST /api/v2/auth/logout
+   *
+   * Adds the current token to the blacklist for server-side logout.
    */
   private async logout(input: any) {
     try {
-      // In a stateless JWT system, logout is handled client-side
-      // by deleting the token. For server-side logout, we'd need
-      // to implement token blacklisting.
-
       const user = input.context.user;
+
+      // Extract token from Authorization header
+      const authHeader = input.context.headers['authorization'] || input.context.headers['Authorization'];
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+      if (token) {
+        // Add token to blacklist with expiration time
+        const expiration = getTokenExpiration(token);
+        const ttl = expiration ? Math.max(0, expiration.getTime() - Date.now()) : 7 * 24 * 60 * 60 * 1000; // Default 7 days
+        await addToBlacklist(token, ttl);
+      }
+
       logger.info(`User logged out: ${user?.userId || 'unknown'}`);
 
       const responseData = {

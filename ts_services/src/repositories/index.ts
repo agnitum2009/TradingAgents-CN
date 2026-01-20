@@ -6,6 +6,7 @@
 
 export * from './base.js';
 export * from './watchlist.repository.js';
+export * from './user.repository.js';
 export * from './news/index.js';
 export * from './batch-queue.repository.js';
 export * from './config/index.js';
